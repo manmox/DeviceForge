@@ -1,56 +1,66 @@
-import { useEffect, useState } from 'react';
 import { Activity, Braces, Check, Clock, Loader2, RotateCcw, Save } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useJsonDraft } from '../hooks/useJsonDraft';
 import { formatBytes, formatUptime } from '../lib/format';
 import { useAppStore } from '../store';
 import type { DeviceDetail } from '../types';
+import { CodeEditor } from './CodeEditor';
+import { EditorModeToggle } from './form/EditorModeToggle';
+import { VisualJsonEditor } from './form/VisualJsonEditor';
 
 export function StatePanel({ device }: { device: DeviceDetail }) {
   const saveState = useAppStore((state) => state.saveState);
   const showToast = useAppStore((state) => state.showToast);
 
   const stateJson = JSON.stringify(device.state, null, 2);
-  const [text, setText] = useState(stateJson);
-  const [dirty, setDirty] = useState(false);
+  const draft = useJsonDraft(device.state, 'state', {
+    baseline: device.state,
+    baselineKey: stateJson,
+    noun: '状态',
+  });
+
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [liveChanged, setLiveChanged] = useState(false);
+  const lastLiveRef = useRef(stateJson);
+  const deviceIdRef = useRef(device.config.id);
 
   useEffect(() => {
-    if (!dirty) setText(stateJson);
-  }, [stateJson, dirty]);
+    if (deviceIdRef.current === device.config.id) return;
+    deviceIdRef.current = device.config.id;
+    lastLiveRef.current = stateJson;
+    draft.load(device.state);
+    setLiveChanged(false);
+  }, [device.config.id, device.state, stateJson, draft.load]);
+
+  useEffect(() => {
+    if (lastLiveRef.current === stateJson) return;
+    lastLiveRef.current = stateJson;
+    if (draft.dirty) setLiveChanged(true);
+  }, [stateJson, draft.dirty]);
+
+  async function handleSave() {
+    const value = draft.mode === 'visual' ? draft.value : draft.parseText();
+    if (!value) return;
+
+    setSaving(true);
+    const ok = await saveState(device.config.id, value);
+    setSaving(false);
+    if (ok) {
+      draft.markSaved();
+      setLiveChanged(false);
+    }
+  }
+
+  function handleReset() {
+    draft.reset();
+    setLiveChanged(false);
+    showToast('已恢复为当前实时状态', 'info');
+  }
 
   const counters = device.status.counters;
   const endpoint =
     device.status.endpoints[0] ??
     `${device.config.transport.host}:${device.config.transport.port}`;
-
-  async function handleSave() {
-    setError(null);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (parseError) {
-      setError(
-        `JSON 解析失败：${parseError instanceof Error ? parseError.message : String(parseError)}`,
-      );
-      return;
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      setError('状态必须是一个 JSON 对象');
-      return;
-    }
-
-    setSaving(true);
-    const ok = await saveState(device.config.id, parsed as Record<string, unknown>);
-    setSaving(false);
-    if (ok) setDirty(false);
-  }
-
-  function handleReset() {
-    setText(stateJson);
-    setDirty(false);
-    setError(null);
-    showToast('已恢复为当前实时状态', 'info');
-  }
 
   const stats = [
     {
@@ -85,20 +95,33 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
         <div className="panel flex min-h-[440px] flex-col overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
             <span className="text-xs font-medium text-mist-200">状态变量</span>
+            <EditorModeToggle
+              mode={draft.mode}
+              onChange={(mode) => {
+                draft.switchMode(mode);
+              }}
+              codeLabel="JSON 源码"
+              disabled={saving}
+            />
             <span
               className={`rounded-md border px-2 py-0.5 text-[10.5px] ${
-                dirty
+                draft.dirty
                   ? 'border-sky-400/20 bg-sky-400/[0.07] text-sky-300'
                   : 'border-accent-500/20 bg-accent-500/[0.07] text-accent-300'
               }`}
             >
-              {dirty ? '未保存' : '实时同步'}
+              {draft.dirty ? '未保存' : '实时同步'}
             </span>
+            {draft.dirty && liveChanged && (
+              <span className="rounded-md border border-amber-400/20 bg-amber-400/[0.07] px-2 py-0.5 text-[10.5px] text-amber-300">
+                实时状态已更新
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-1.5">
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleReset}
-                disabled={!dirty || saving}
+                disabled={!draft.dirty || saving}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 恢复
@@ -106,7 +129,7 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => void handleSave()}
-                disabled={!dirty || saving}
+                disabled={!draft.dirty || saving}
               >
                 {saving ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -118,22 +141,40 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
             </div>
           </div>
 
-          <textarea
-            className="min-h-0 flex-1 resize-none border-0 bg-transparent p-3 font-mono text-xs leading-6 text-mist-200 outline-none"
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              setDirty(true);
-              setError(null);
-            }}
-            spellCheck={false}
-          />
-
-          {error && (
-            <div className="shrink-0 border-t border-rose-500/20 bg-rose-500/[0.06] px-3 py-2 text-[11px] text-rose-200">
-              {error}
+          {draft.mode === 'visual' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <VisualJsonEditor
+                value={draft.value}
+                onChange={draft.updateValue}
+                keyPlaceholder="变量名"
+                addLabel="添加变量"
+                emptyText="暂无状态变量"
+                templates={false}
+                disabled={saving}
+              />
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1">
+              <CodeEditor
+                value={draft.text}
+                onChange={draft.updateText}
+                language="json"
+                borderless
+                readOnly={saving}
+                ariaLabel="状态 JSON 源码"
+              />
             </div>
           )}
+
+          {draft.error && (
+            <div className="shrink-0 border-t border-rose-500/20 bg-rose-500/[0.06] px-3 py-2 text-[11px] text-rose-200">
+              {draft.error}
+            </div>
+          )}
+
+          <div className="shrink-0 border-t border-white/10 px-3 py-1.5 text-[10px] text-mist-500">
+            保存会替换整个状态对象；编辑期间规则产生的其他状态更新会被当前草稿覆盖。
+          </div>
         </div>
 
         <div className="space-y-3">

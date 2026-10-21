@@ -11,7 +11,7 @@
     "dev": "concurrently -k -n server,web -c cyan,green \"pnpm --filter @deviceforge/server dev\" \"pnpm --filter @deviceforge/web dev\"",
     "build": "pnpm -r typecheck && pnpm --filter @deviceforge/web build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @deviceforge/core test",
+    "test": "pnpm --filter @deviceforge/core test && pnpm --filter @deviceforge/web test",
     "start": "pnpm --filter @deviceforge/server start",
     "demo:client": "tsx scripts/send-demo.ts"
   },

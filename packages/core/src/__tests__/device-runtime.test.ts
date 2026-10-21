@@ -193,3 +193,12 @@ describe('DeviceRuntime over TCP', () => {
     }
   });
 });
+
+describe('DeviceRuntime state', () => {
+  it('replaces the whole state object instead of merging', () => {
+    const runtime = new DeviceRuntime({ ...config, state: { a: 1, b: 2 } });
+
+    expect(runtime.setState({ b: 3 })).toEqual({ b: 3 });
+    expect(runtime.getState()).toEqual({ b: 3 });
+  });
+});

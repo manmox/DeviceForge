@@ -19,7 +19,7 @@ const FEATURES = [
   {
     icon: Waypoints,
     title: '自定义帧与 CRC',
-    description: '魔数、长度字段、大小端、BCD、校验和都用 YAML 描述；复杂协议可在后续版本用 JS 钩子扩展。',
+    description: '魔数、长度字段、大小端、BCD、校验和都能用可视化表单或 YAML 描述；复杂协议可在后续版本用 JS 钩子扩展。',
   },
   {
     icon: Radio,
@@ -100,7 +100,7 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
             <div>
               <h2 className="text-lg font-semibold text-mist-100">从预设开始</h2>
               <p className="mt-1 text-xs text-mist-500">
-                预设只是起点，选中后可以继续修改 YAML。
+                预设只是起点，选中后可以用可视化表单或 YAML 继续修改。
               </p>
             </div>
             <span className="hidden text-[11px] text-mist-500 sm:block">

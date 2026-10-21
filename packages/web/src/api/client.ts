@@ -155,4 +155,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ yaml }),
     }).then((result) => result.config),
+
+  validateConfig: (config: unknown) =>
+    request<{ config: DeviceConfig }>('/api/config/validate', {
+      method: 'POST',
+      body: JSON.stringify({ config }),
+    }).then((result) => result.config),
 };

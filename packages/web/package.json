@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-yaml": "^6.1.3",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@deviceforge/core": "workspace:*",
@@ -28,6 +30,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

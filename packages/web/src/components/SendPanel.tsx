@@ -1,47 +1,58 @@
-import { useState } from 'react';
 import { Check, Send } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useJsonDraft } from '../hooks/useJsonDraft';
+import { codecFieldSuggestions, defaultFieldsForCodec } from '../lib/codec-fields';
 import { useAppStore } from '../store';
-import type { DeviceDetail } from '../types';
-
-function defaultFields(device: DeviceDetail): string {
-  const codec = device.config.codec;
-  if (codec.type !== 'fields') {
-    return JSON.stringify({ hex: '' }, null, 2);
-  }
-  const values: Record<string, unknown> = {};
-  for (const field of codec.fields) {
-    if (field.const !== undefined || field.calc !== undefined) continue;
-    if (field.type === 'bytes' || field.type === 'string') values[field.name] = '';
-    else if (field.type === 'bcd') values[field.name] = '0';
-    else values[field.name] = 0;
-  }
-  return JSON.stringify(values, null, 2);
-}
+import { CodeEditor } from './CodeEditor';
+import { EditorModeToggle } from './form/EditorModeToggle';
+import { SegmentedControl } from './form/FormControls';
+import { VisualJsonEditor } from './form/VisualJsonEditor';
 
 export function SendPanel() {
   const device = useAppStore((state) => state.device);
   const connections = useAppStore((state) => state.connections);
   const send = useAppStore((state) => state.send);
 
-  const [mode, setMode] = useState<'hex' | 'fields'>('hex');
-  const [hexValue, setHexValue] = useState('');
-  const [fieldsValue, setFieldsValue] = useState(() =>
-    device ? defaultFields(device) : '{}',
+  const codec = device?.config.codec;
+  const baseline = useMemo(
+    () => (codec ? defaultFieldsForCodec(codec) : {}),
+    [codec],
   );
+  const baselineKey = device
+    ? `${device.config.id}:${JSON.stringify(device.config.codec)}`
+    : 'none';
+  const draft = useJsonDraft(baseline, 'send', {
+    baseline,
+    baselineKey,
+    noun: 'fields',
+  });
+
+  const [payloadMode, setPayloadMode] = useState<'hex' | 'fields'>('hex');
+  const [hexValue, setHexValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
+  const deviceIdRef = useRef(device?.config.id ?? '');
+  useEffect(() => {
+    const id = device?.config.id ?? '';
+    if (deviceIdRef.current === id) return;
+    deviceIdRef.current = id;
+    if (device) draft.load(defaultFieldsForCodec(device.config.codec));
+  }, [device?.config.id, device?.config.codec, draft.load]);
+
   if (!device) return null;
 
   const connected = connections.length > 0;
+  const displayError = error ?? draft.error;
 
   async function handleSend() {
     setError(null);
+    draft.setError(null);
     setSent(false);
 
     let payload: { hex?: string; fields?: Record<string, unknown> };
-    if (mode === 'hex') {
+    if (payloadMode === 'hex') {
       const hex = hexValue.replace(/\s+/g, '');
       if (!/^(?:[0-9a-fA-F]{2})+$/.test(hex)) {
         setError('请输入偶数位十六进制，例如 AA 55 01 00');
@@ -49,18 +60,9 @@ export function SendPanel() {
       }
       payload = { hex };
     } else {
-      try {
-        const parsed = JSON.parse(fieldsValue) as unknown;
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('fields 必须是 JSON 对象');
-        }
-        payload = { fields: parsed as Record<string, unknown> };
-      } catch (parseError) {
-        setError(
-          `JSON 解析失败：${parseError instanceof Error ? parseError.message : String(parseError)}`,
-        );
-        return;
-      }
+      const fields = draft.mode === 'visual' ? draft.value : draft.parseText();
+      if (!fields) return;
+      payload = { fields };
     }
 
     setSending(true);
@@ -70,6 +72,12 @@ export function SendPanel() {
       setSent(true);
       window.setTimeout(() => setSent(false), 1600);
     }
+  }
+
+  function resetFields() {
+    draft.reset();
+    setError(null);
+    draft.setError(null);
   }
 
   return (
@@ -94,28 +102,25 @@ export function SendPanel() {
           </span>
         )}
 
-        <div className="ml-auto flex items-center rounded-lg border border-white/10 p-0.5">
-          {(['hex', 'fields'] as const).map((value) => (
-            <button
-              key={value}
-              className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
-                mode === value
-                  ? 'bg-white/10 text-mist-100'
-                  : 'text-mist-500 hover:text-mist-300'
-              }`}
-              onClick={() => {
-                setMode(value);
-                setError(null);
-              }}
-            >
-              {value === 'hex' ? 'HEX' : '字段 JSON'}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl<'hex' | 'fields'>
+          ariaLabel="发送内容格式"
+          value={payloadMode}
+          options={[
+            { value: 'hex', label: 'HEX' },
+            { value: 'fields', label: '字段' },
+          ]}
+          onChange={(next) => {
+            setPayloadMode(next);
+            setError(null);
+            draft.setError(null);
+          }}
+          size="sm"
+          className="ml-auto"
+        />
       </div>
 
       <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start">
-        {mode === 'hex' ? (
+        {payloadMode === 'hex' ? (
           <textarea
             className="field min-h-[54px] flex-1 resize-y py-2 font-mono text-xs leading-5"
             placeholder="AA 55 00 0C 03 01 00 00 00 00 00 00"
@@ -127,16 +132,62 @@ export function SendPanel() {
             spellCheck={false}
           />
         ) : (
-          <textarea
-            className="field min-h-[86px] flex-1 resize-y py-2 font-mono text-xs leading-5"
-            placeholder={'{\n  "cmd": 3,\n  "seq": 1\n}'}
-            value={fieldsValue}
-            onChange={(event) => {
-              setFieldsValue(event.target.value);
-              setError(null);
-            }}
-            spellCheck={false}
-          />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <EditorModeToggle
+                mode={draft.mode}
+                onChange={(mode) => {
+                  draft.switchMode(mode);
+                }}
+                codeLabel="JSON 源码"
+                size="sm"
+                disabled={sending}
+              />
+              <span className="text-[10.5px] text-mist-500">
+                {codec?.type === 'fields'
+                  ? '按 codec 字段填写；缺少必填字段发送会报错。'
+                  : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm ml-auto"
+                onClick={resetFields}
+                title="根据 codec 字段生成示例"
+              >
+                示例
+              </button>
+            </div>
+
+            {draft.mode === 'visual' ? (
+              <div className="max-h-[220px] min-h-[86px] overflow-y-auto pr-1">
+                <VisualJsonEditor
+                  value={draft.value}
+                  onChange={(next) => {
+                    setError(null);
+                    draft.updateValue(next);
+                  }}
+                  keyPlaceholder="字段名"
+                  addLabel="添加字段"
+                  emptyText="暂无字段"
+                  templates
+                  suggestions={codecFieldSuggestions(device.config.codec)}
+                  disabled={sending}
+                />
+              </div>
+            ) : (
+              <CodeEditor
+                value={draft.text}
+                onChange={(next) => {
+                  setError(null);
+                  draft.updateText(next);
+                }}
+                language="json"
+                height="150px"
+                compact
+                readOnly={sending}
+                ariaLabel="发送字段 JSON 源码"
+              />
+            )}
+          </div>
         )}
 
         <div className="flex items-center gap-2 sm:flex-col sm:items-stretch">
@@ -147,19 +198,10 @@ export function SendPanel() {
           >
             {sending ? '发送中…' : '发送'}
           </button>
-          {mode === 'fields' && (
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setFieldsValue(defaultFields(device))}
-              title="根据 codec 字段生成示例"
-            >
-              示例
-            </button>
-          )}
         </div>
       </div>
 
-      {error && <p className="mt-1.5 text-[11px] text-rose-300">{error}</p>}
+      {displayError && <p className="mt-1.5 text-[11px] text-rose-300">{displayError}</p>}
     </section>
   );
 }

@@ -301,8 +301,8 @@ export class DeviceRuntime {
     return { ...this.state };
   }
 
-  setState(patch: Record<string, unknown>): Record<string, unknown> {
-    Object.assign(this.state, patch);
+  setState(next: Record<string, unknown>): Record<string, unknown> {
+    this.state = structuredClone(next);
     const state = this.getState();
     this.bus.emit('state', { deviceId: this.id, state });
     return state;
