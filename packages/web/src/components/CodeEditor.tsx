@@ -27,10 +27,14 @@ export function CodeEditor({
   const wrapperClass = borderless
     ? 'min-h-0 overflow-hidden bg-transparent'
     : 'min-h-0 overflow-hidden rounded-lg border border-white/10 bg-ink-950/60';
+  const sizeStyle = { height };
 
   return (
-    <div className={wrapperClass} style={{ height }}>
+    <div className={wrapperClass} style={sizeStyle}>
+      {/* cm-theme 是库插入的中间层；必须给它同样的高度，
+          否则 .cm-editor 的 100% 会退化为 auto，滚动条不会出现。 */}
       <CodeMirror
+        style={sizeStyle}
         value={value}
         height="100%"
         theme={oneDark}

@@ -77,7 +77,7 @@ export function ConfigSectionNav({
       role="tablist"
       aria-label="配置分区"
       onKeyDown={handleKeyDown}
-      className="panel flex shrink-0 gap-1 overflow-x-auto p-1 lg:w-36 lg:flex-col lg:self-start lg:overflow-visible xl:w-44"
+      className="panel flex shrink-0 gap-1 overflow-x-auto p-1 lg:max-h-full lg:w-36 lg:flex-col lg:self-start lg:overflow-y-auto xl:w-44"
     >
       {CONFIG_SECTIONS.map((section) => (
         <SectionTab

@@ -122,7 +122,7 @@ export function NewDeviceDialog({
         aria-modal="true"
         aria-label="新建设备"
       >
-        <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
+        <div className="flex shrink-0 items-start gap-3 border-b border-white/10 px-5 py-4">
           {step === 'editor' ? (
             <button
               className="btn btn-ghost mt-0.5 rounded-lg p-1.5"
@@ -250,7 +250,7 @@ export function NewDeviceDialog({
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-3.5">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 px-5 py-3.5">
               <p className="hidden text-[11px] text-mist-500 sm:block">
                 设备 ID 不能与现有设备重复；端口被占用时启动会提示。
               </p>
