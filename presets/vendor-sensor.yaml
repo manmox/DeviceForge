@@ -1,0 +1,56 @@
+id: vendor-sensor
+name: 厂商温湿度传感器
+description: AA55 魔数 + 总长度字段 + CRC16/MODBUS，演示握手、请求响应和周期上报
+transport:
+  type: tcp-server
+  host: 127.0.0.1
+  port: 19001
+framing:
+  type: length-prefix
+  lengthField:
+    offset: 2
+    size: 2
+    endian: be
+    adjust: 0
+  maxFrameLength: 4096
+codec:
+  type: fields
+  fields:
+    - { name: magic, type: bytes, length: 2, const: "AA55" }
+    - { name: length, type: u16, endian: be, calc: totalLength }
+    - { name: cmd, type: u8 }
+    - { name: seq, type: u16, endian: le }
+    - { name: temp, type: i16, endian: be, scale: 0.1, unit: "℃" }
+    - { name: humidity, type: u8, unit: "%" }
+  checksum: { algo: crc16-modbus, endian: le }
+state:
+  temp: 25.5
+  humidity: 60
+rules:
+  - name: 上线握手
+    on: connect
+    send:
+      fields: { cmd: 1, seq: 0, temp: 0, humidity: 0 }
+  - name: 读取温湿度
+    on: frame
+    match: { cmd: 3 }
+    send:
+      fields:
+        cmd: 131
+        seq: "$req.seq"
+        temp: "$state.temp"
+        humidity: "$state.humidity"
+  - name: 周期上报
+    every: 5000
+    jitter: 200
+    target: all
+    set:
+      temp: "${randomFloat(20,30)}"
+      humidity: "${random(40,70)}"
+    send:
+      fields:
+        cmd: 2
+        seq: "$counter.tx"
+        temp: "$state.temp"
+        humidity: "$state.humidity"
+autoStart: false

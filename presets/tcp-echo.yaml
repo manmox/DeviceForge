@@ -1,0 +1,15 @@
+id: tcp-echo
+name: 原始 TCP 设备
+description: 无协议解析的裸 TCP 端口，适合手动发送十六进制数据并观察上行报文
+transport:
+  type: tcp-server
+  host: 127.0.0.1
+  port: 19002
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules: []
+autoStart: false

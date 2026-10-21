@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --color-ink-950: #070a0f;
+  --color-ink-900: #0b1017;
+  --color-ink-850: #0e141d;
+  --color-ink-800: #121a25;
+  --color-ink-700: #1a2533;
+  --color-ink-600: #243244;
+  --color-mist-600: #516176;
+  --color-mist-500: #6f8096;
+  --color-mist-400: #8b9bb0;
+  --color-mist-300: #a9b7c8;
+  --color-mist-200: #cbd5e1;
+  --color-mist-100: #e8eef6;
+  --color-accent-300: #6ee7c8;
+  --color-accent-400: #3ddbb0;
+  --color-accent-500: #20c997;
+  --color-accent-600: #14a97d;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-ink-950);
+    color: var(--color-mist-200);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::selection {
+    background: rgba(32, 201, 151, 0.25);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #243244;
+    border-radius: 999px;
+    border: 2px solid #070a0f;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #33465c;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply bg-accent-500 text-ink-950 hover:bg-accent-400;
+  }
+
+  .btn-ghost {
+    @apply text-mist-300 hover:bg-white/5 hover:text-mist-100;
+  }
+
+  .btn-outline {
+    @apply border border-white/10 text-mist-300 hover:border-white/20 hover:bg-white/5 hover:text-mist-100;
+  }
+
+  .btn-danger {
+    @apply bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-white/10 bg-ink-900 px-3 py-2 text-sm text-mist-200 outline-none transition-colors placeholder:text-mist-500 focus:border-accent-500/60 focus:ring-2 focus:ring-accent-500/10;
+  }
+
+  .panel {
+    @apply rounded-xl border border-white/10 bg-ink-900/70;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-xs text-mist-400;
+  }
+
+  .kbd {
+    @apply rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[11px] text-mist-300;
+  }
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.hero-glow {
+  background:
+    radial-gradient(600px 320px at 30% 0%, rgba(32, 201, 151, 0.1), transparent 70%),
+    radial-gradient(420px 260px at 85% 20%, rgba(56, 189, 248, 0.08), transparent 70%);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.16s ease-out;
+}
+
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+  background: transparent !important;
+}
+
+.cm-scroller {
+  font-family: var(--font-mono) !important;
+  line-height: 1.6 !important;
+}
+
+.cm-gutters {
+  background: transparent !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #4b5b70 !important;
+}
+
+.cm-activeLine,
+.cm-activeLineGutter {
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+.cm-focused {
+  outline: none !important;
+}

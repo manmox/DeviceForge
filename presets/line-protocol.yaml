@@ -1,0 +1,21 @@
+id: line-protocol
+name: ASCII 行协议设备
+description: 以 CRLF 分帧的行协议，收到任意一行返回 OK
+transport:
+  type: tcp-server
+  host: 127.0.0.1
+  port: 19003
+framing:
+  type: delimiter
+  delimiter: "0D0A"
+  includeDelimiter: false
+codec:
+  type: raw
+  display: ascii
+state: {}
+rules:
+  - name: 回显 OK
+    on: frame
+    send:
+      fields: { text: "OK\r\n" }
+autoStart: false
