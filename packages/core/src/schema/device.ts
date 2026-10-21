@@ -202,6 +202,15 @@ export const RuleSchema = z
     }
   });
 
+export const DeviceInfoSchema = z.object({
+  manufacturer: z.string().optional(),
+  model: z.string().optional(),
+  serialNumber: z.string().optional(),
+  hardwareVersion: z.string().optional(),
+  firmwareVersion: z.string().optional(),
+  tnsImei: z.string().optional(),
+});
+
 export const DeviceConfigSchema = z.object({
   id: z
     .string()
@@ -209,6 +218,7 @@ export const DeviceConfigSchema = z.object({
     .regex(/^[A-Za-z0-9_-]+$/, 'id 只能包含字母、数字、下划线和中划线'),
   name: z.string().min(1),
   description: z.string().optional(),
+  deviceInfo: DeviceInfoSchema.optional(),
   transport: TransportSchema,
   framing: FramingSchema.default({ type: 'raw' }),
   codec: CodecSchema.default({ type: 'raw', display: 'hex' }),
@@ -224,4 +234,5 @@ export type FieldDef = z.infer<typeof FieldSchema>;
 export type CodecConfig = z.infer<typeof CodecSchema>;
 export type OutgoingMessage = z.infer<typeof OutgoingMessageSchema>;
 export type Rule = z.infer<typeof RuleSchema>;
+export type DeviceInfo = z.infer<typeof DeviceInfoSchema>;
 export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;

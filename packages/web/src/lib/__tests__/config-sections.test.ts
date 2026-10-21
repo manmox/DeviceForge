@@ -11,6 +11,7 @@ import {
 const config: DeviceConfig = {
   id: 'sensor',
   name: '传感器',
+  deviceInfo: { serialNumber: 'SN-0001', model: 'TH-100' },
   transport: { type: 'tcp-server', host: '127.0.0.1', port: 19001 },
   framing: {
     type: 'length-prefix',
@@ -32,6 +33,8 @@ const config: DeviceConfig = {
 
 describe('sectionForIssuePath', () => {
   it('matches exact and nested issue paths', () => {
+    expect(sectionForIssuePath('deviceInfo')).toBe('deviceInfo');
+    expect(sectionForIssuePath('deviceInfo.serialNumber')).toBe('deviceInfo');
     expect(sectionForIssuePath('transport.port')).toBe('transport');
     expect(sectionForIssuePath('transport')).toBe('transport');
     expect(sectionForIssuePath('codec.fields.0.name')).toBe('codec');
@@ -57,6 +60,9 @@ describe('firstIssueSection', () => {
         { path: 'transport.port', message: 'bad' },
       ]),
     ).toBe('codec');
+    expect(
+      firstIssueSection([{ path: 'deviceInfo.serialNumber', message: 'bad' }]),
+    ).toBe('deviceInfo');
   });
 });
 
@@ -67,6 +73,9 @@ describe('nextSectionId', () => {
     expect(nextSectionId('codec', 'next')).toBe('state');
     expect(nextSectionId('codec', 'first')).toBe('basic');
     expect(nextSectionId('codec', 'last')).toBe('rules');
+    expect(nextSectionId('basic', 'next')).toBe('deviceInfo');
+    expect(nextSectionId('deviceInfo', 'next')).toBe('transport');
+    expect(nextSectionId('transport', 'previous')).toBe('deviceInfo');
   });
 });
 
@@ -81,10 +90,17 @@ describe('issueItemIndex', () => {
 
 describe('sectionHint', () => {
   it('summarizes the current config per section', () => {
+    expect(sectionHint(config, 'deviceInfo')).toBe('S/N SN-0001');
     expect(sectionHint(config, 'transport')).toBe('127.0.0.1:19001');
     expect(sectionHint(config, 'framing')).toBe('长度字段');
     expect(sectionHint(config, 'codec')).toBe('fields · 2 字段');
     expect(sectionHint(config, 'state')).toBe('2 个变量');
     expect(sectionHint(config, 'rules')).toBe('0 条规则');
+  });
+
+  it('shows an empty hint when deviceInfo is absent', () => {
+    expect(sectionHint({ ...config, deviceInfo: undefined }, 'deviceInfo')).toBe(
+      '未填写',
+    );
   });
 });

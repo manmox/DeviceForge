@@ -22,6 +22,7 @@
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
 - 模板：请求字段、设备状态、计数器、连接信息和随机数
+- 设备信息：可选的厂商、型号、S/N、硬件/固件版本和厂商自定义 TNS/IMEI 元数据
 - Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看
 - 配置持久化到 `data/devices.json`；报文和运行时状态保存在内存
 - 内置 3 个预设，分别展示行协议、TCP 回显和传感器数据
@@ -72,6 +73,13 @@ pnpm start
 id: vendor-sensor
 name: 厂商温湿度传感器
 description: AA55 魔数 + 总长度字段 + CRC16/MODBUS
+deviceInfo:
+  manufacturer: DeviceForge Demo
+  model: DF-TH100
+  serialNumber: DEMO-SN-0001
+  hardwareVersion: HW-1.0
+  firmwareVersion: FW-1.0.3
+  tnsImei: DEMO-TNS-0001
 
 transport:
   type: tcp-server
@@ -171,6 +179,25 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 
 `checksum.algo` 支持 `sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`，默认写在帧尾、覆盖校验字段之前的全部字节。`endian` 默认值：CRC16/MODBUS 和 CRC32 为 `le`，其余为 `be`；可用 `verify: false` 只展示不阻断规则。
 
+### 设备信息（可选）
+
+`deviceInfo` 用于记录真实硬件铭牌上的身份信息，所有字段可选；没有填写时不会出现在 YAML/JSON 中。
+
+| 字段 | 说明 |
+| --- | --- |
+| `manufacturer` | 制造商 |
+| `model` | 型号 |
+| `serialNumber` | 厂商序列号（S/N），用于资产/供应链追踪 |
+| `hardwareVersion` | 硬件版本 |
+| `firmwareVersion` | 固件版本 |
+| `tnsImei` | 厂商自定义的 TNS/IMEI 标识，不是标准字段 |
+
+- `id` 是 DeviceForge 的平台注册键，和厂商 S/N 相互独立。
+- `serialNumber` 不是认证凭据；需要认证时应使用独立的密钥/证书配置。
+- `tnsImei` 是单个不透明字符串，不做 IMEI/TNS 格式校验，也不强制唯一。
+- 这些字段目前只保存和展示，不参与分帧、编解码、规则、模板、流量日志或协议发送。
+- 字段命名参考 LwM2M Device Object、OPC UA DI 等模型中的 Manufacturer/Model/SerialNumber 概念，不是某个具体协议的线格式。
+
 ## 规则与模板
 
 规则触发方式：
@@ -211,7 +238,7 @@ match:
 
 设备配置、初始状态、运行时状态和手动发送字段都支持「可视化 / 源码」切换：
 
-- **设备配置**：基本信息、传输、分帧、字段编解码、校验和、初始状态、规则（触发/匹配/set/send）全部表单化。
+- **设备配置**：基本信息、设备信息、传输、分帧、字段编解码、校验和、初始状态、规则（触发/匹配/set/send）全部表单化。
 - **分区导航与摘要行**：左侧（窄屏为顶部）按分区切换，一次只显示一节；字段和规则默认折叠为一行摘要，按需展开。校验失败时会跳到第一个问题分区并展开对应条目。
 - **状态与发送字段**：键值表 + 类型选择，支持字符串、数字、布尔、null、对象和数组；复杂结构可以切到 JSON 源码。
 - **默认可视化**：每个编辑面分别记住上次选择（localStorage）；源码模式始终保留作为兜底。
@@ -250,7 +277,10 @@ pnpm start           # 生产模式（需要先 build）
 - 字段编解码回环、CRC 校验失败、固定长度/剩余长度/fromField
 - 模板求值和字段匹配
 - 真实 `node:net` 客户端连 TCP 设备：握手、请求响应、手动发送、错误 CRC 不触发规则
+- 设备信息 `deviceInfo` 的 schema 解析和 Web 端元数据归一化/摘要
 - Web 端配置默认值、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
+
+本地文档统一放在 `docs/`；该目录已加入 `.gitignore`，不会进入版本库。
 
 ## 环境变量
 

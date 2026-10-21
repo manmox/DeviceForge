@@ -28,6 +28,7 @@ describe('createBlankConfig', () => {
     expect(config.state).toEqual({});
     expect(config.rules).toEqual([]);
     expect(config.autoStart).toBe(false);
+    expect(config.deviceInfo).toBeUndefined();
   });
 });
 

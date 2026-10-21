@@ -19,6 +19,7 @@ import { ConfigIssuesProvider } from '../form/ConfigIssuesContext';
 import { ConfigSectionNav } from './ConfigSectionNav';
 import { BasicSection } from './BasicSection';
 import { CodecSection } from './CodecSection';
+import { DeviceInfoSection } from './DeviceInfoSection';
 import { FramingSection } from './FramingSection';
 import { RulesSection } from './RulesSection';
 import { StateSection } from './StateSection';
@@ -74,6 +75,13 @@ export function DeviceConfigForm({
         config={value}
         onChange={onChange}
         idLocked={idLocked}
+        disabled={disabled}
+      />
+    ),
+    deviceInfo: (
+      <DeviceInfoSection
+        config={value}
+        onChange={onChange}
         disabled={disabled}
       />
     ),

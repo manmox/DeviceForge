@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ConfigPanel } from '../components/ConfigPanel';
 import { ConnectionsPanel } from '../components/ConnectionsPanel';
+import { deviceInfoHeaderValues } from '../lib/device-info';
 import { StatePanel } from '../components/StatePanel';
 import { StatusBadge } from '../components/StatusBadge';
 import { TrafficPanel } from '../components/TrafficPanel';
@@ -66,6 +67,7 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
     traffic: trafficCount,
     connections: status.connections.length,
   };
+  const identity = deviceInfoHeaderValues(device.config.deviceInfo);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -126,6 +128,22 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
                 </span>
               )}
             </div>
+            {identity.length > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-mist-500">
+                {identity.map((item) => (
+                  <span
+                    key={item.key}
+                    className="inline-flex min-w-0 items-center gap-1"
+                    title={`${item.label} ${item.value}`}
+                  >
+                    <span className="shrink-0 text-mist-600">{item.label}</span>
+                    <span className="max-w-[18rem] truncate font-mono text-mist-400">
+                      {item.value}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">

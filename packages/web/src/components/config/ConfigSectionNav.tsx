@@ -3,6 +3,7 @@ import {
   Braces,
   Cable,
   Database,
+  Fingerprint,
   Ruler,
   Settings2,
   Workflow,
@@ -22,6 +23,7 @@ import { useIssuesForPaths } from '../form/ConfigIssuesContext';
 
 const SECTION_ICONS: Record<ConfigSectionId, LucideIcon> = {
   basic: Settings2,
+  deviceInfo: Fingerprint,
   transport: Cable,
   framing: Ruler,
   codec: Braces,

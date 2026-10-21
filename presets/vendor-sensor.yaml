@@ -1,6 +1,13 @@
 id: vendor-sensor
 name: 厂商温湿度传感器
 description: AA55 魔数 + 总长度字段 + CRC16/MODBUS，演示握手、请求响应和周期上报
+deviceInfo:
+  manufacturer: DeviceForge Demo
+  model: DF-TH100
+  serialNumber: DEMO-SN-0001
+  hardwareVersion: HW-1.0
+  firmwareVersion: FW-1.0.3
+  tnsImei: DEMO-TNS-0001
 transport:
   type: tcp-server
   host: 127.0.0.1

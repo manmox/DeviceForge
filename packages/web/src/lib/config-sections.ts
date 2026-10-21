@@ -1,7 +1,9 @@
 import type { DeviceConfig } from '@deviceforge/core';
+import { deviceInfoHint } from './device-info';
 
 export type ConfigSectionId =
   | 'basic'
+  | 'deviceInfo'
   | 'transport'
   | 'framing'
   | 'codec'
@@ -21,6 +23,12 @@ export const CONFIG_SECTIONS: ConfigSection[] = [
     label: '基本信息',
     description: '设备标识、显示名称和启动行为。',
     paths: ['', 'id', 'name', 'description', 'autoStart'],
+  },
+  {
+    id: 'deviceInfo',
+    label: '设备信息',
+    description: '厂商、型号、序列号和版本等硬件标识，仅用于展示和记录。',
+    paths: ['deviceInfo'],
   },
   {
     id: 'transport',
@@ -104,6 +112,8 @@ export function sectionHint(config: DeviceConfig, id: ConfigSectionId): string {
   switch (id) {
     case 'basic':
       return config.id;
+    case 'deviceInfo':
+      return deviceInfoHint(config.deviceInfo);
     case 'transport':
       return `${config.transport.host}:${config.transport.port}`;
     case 'framing':

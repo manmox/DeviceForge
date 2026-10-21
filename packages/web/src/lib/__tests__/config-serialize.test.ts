@@ -12,6 +12,11 @@ const config: DeviceConfig = {
   id: 'serialize-test',
   name: '序列化测试',
   description: undefined,
+  deviceInfo: {
+    serialNumber: 'SN-0001',
+    manufacturer: undefined,
+    tnsImei: 'DEMO-TNS-0001',
+  },
   transport: { type: 'tcp-server', host: '127.0.0.1', port: 19001 },
   framing: {
     type: 'length-prefix',
@@ -64,6 +69,14 @@ describe('stringifyDeviceConfig', () => {
   it('emits YAML that parses back to the same JSON-compatible config', () => {
     const yaml = stringifyDeviceConfig(config);
     expect(YAML.parse(yaml)).toEqual(stripUndefined(config));
+  });
+
+  it('drops undefined deviceInfo fields from YAML', () => {
+    const yaml = stringifyDeviceConfig(config);
+    expect(YAML.parse(yaml).deviceInfo).toEqual({
+      serialNumber: 'SN-0001',
+      tnsImei: 'DEMO-TNS-0001',
+    });
   });
 });
 
