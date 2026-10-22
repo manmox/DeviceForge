@@ -15,7 +15,12 @@ export function defaultFraming(type: FramingConfig['type']): FramingConfig {
     case 'raw':
       return { type: 'raw' };
     case 'delimiter':
-      return { type: 'delimiter', delimiter: '0D0A', includeDelimiter: false };
+      return {
+        type: 'delimiter',
+        delimiterFormat: 'text',
+        delimiter: '\r\n',
+        includeDelimiter: false,
+      };
     case 'length-prefix':
       return {
         type: 'length-prefix',

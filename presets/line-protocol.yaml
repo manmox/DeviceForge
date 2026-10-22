@@ -7,7 +7,8 @@ transport:
   port: 19003
 framing:
   type: delimiter
-  delimiter: "0D0A"
+  delimiterFormat: text
+  delimiter: "\r\n"
   includeDelimiter: false
 codec:
   type: raw

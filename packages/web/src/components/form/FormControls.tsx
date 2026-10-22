@@ -39,6 +39,8 @@ export function TextInput({
   className = '',
   ariaLabel,
   list,
+  onFocus,
+  onBlur,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -48,6 +50,8 @@ export function TextInput({
   className?: string;
   ariaLabel?: string;
   list?: string;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }) {
   return (
     <input
@@ -58,6 +62,8 @@ export function TextInput({
       disabled={disabled}
       aria-label={ariaLabel}
       list={list}
+      onFocus={onFocus}
+      onBlur={onBlur}
       spellCheck={false}
     />
   );

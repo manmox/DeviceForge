@@ -79,3 +79,74 @@ describe('DeviceConfigSchema deviceInfo', () => {
     expect(result.error.issues[0]?.path).toEqual(['deviceInfo', 'serialNumber']);
   });
 });
+
+describe('DeviceConfigSchema delimiter framing', () => {
+  it('defaults legacy delimiter configs to hex', () => {
+    const parsed = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      framing: { type: 'delimiter', delimiter: '0D0A' },
+    });
+    expect(parsed.framing).toEqual({
+      type: 'delimiter',
+      delimiterFormat: 'hex',
+      delimiter: '0D0A',
+      includeDelimiter: false,
+    });
+  });
+
+  it('accepts text delimiters including controls and Unicode', () => {
+    for (const delimiter of ['|', '\r\n', '帧', '😀', '\0', '0D0A']) {
+      const parsed = DeviceConfigSchema.parse({
+        ...baseConfig(),
+        framing: {
+          type: 'delimiter',
+          delimiterFormat: 'text',
+          delimiter,
+        },
+      });
+      expect(parsed.framing).toEqual({
+        type: 'delimiter',
+        delimiterFormat: 'text',
+        delimiter,
+        includeDelimiter: false,
+      });
+    }
+  });
+
+  it('rejects empty text and invalid hex delimiters with the delimiter path', () => {
+    const cases = [
+      { type: 'delimiter', delimiterFormat: 'text', delimiter: '' },
+      { type: 'delimiter', delimiterFormat: 'hex', delimiter: '0D0' },
+      { type: 'delimiter', delimiterFormat: 'hex', delimiter: 'ZZ' },
+      { type: 'delimiter', delimiterFormat: 'hex', delimiter: '' },
+      { type: 'delimiter', delimiter: '|' },
+    ];
+
+    for (const framing of cases) {
+      const result = DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        framing,
+      });
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      expect(result.error.issues[0]?.path).toEqual(['framing', 'delimiter']);
+    }
+  });
+
+  it('rejects an unknown delimiter format', () => {
+    const result = DeviceConfigSchema.safeParse({
+      ...baseConfig(),
+      framing: {
+        type: 'delimiter',
+        delimiterFormat: 'binary',
+        delimiter: '|',
+      },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual([
+      'framing',
+      'delimiterFormat',
+    ]);
+  });
+});

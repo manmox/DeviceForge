@@ -44,6 +44,7 @@ describe('delimiter framer', () => {
   it('splits on a hex delimiter and optionally keeps it', () => {
     const framer = createFramer({
       type: 'delimiter',
+      delimiterFormat: 'hex',
       delimiter: '0d0a',
       includeDelimiter: false,
     });
@@ -52,11 +53,103 @@ describe('delimiter framer', () => {
 
     const keeping = createFramer({
       type: 'delimiter',
+      delimiterFormat: 'hex',
       delimiter: '0d0a',
       includeDelimiter: true,
     });
     const kept = keeping.push(Buffer.from('hi\r\n', 'utf8'));
     expect(kept[0]!.toString('hex')).toBe('68690d0a');
+  });
+
+  it('splits on text delimiters and preserves their bytes when requested', () => {
+    const framer = createFramer({
+      type: 'delimiter',
+      delimiterFormat: 'text',
+      delimiter: '|',
+      includeDelimiter: false,
+    });
+    expect(
+      framer
+        .push(Buffer.from('one|two|', 'utf8'))
+        .map((item) => item.toString('utf8')),
+    ).toEqual(['one', 'two']);
+
+    const keeping = createFramer({
+      type: 'delimiter',
+      delimiterFormat: 'text',
+      delimiter: '*',
+      includeDelimiter: true,
+    });
+    expect(keeping.push(Buffer.from('a*b*', 'utf8')).map((item) => item.toString('utf8'))).toEqual([
+      'a*',
+      'b*',
+    ]);
+  });
+
+  it('treats text "0D0A" as four ASCII characters, not CRLF', () => {
+    const config = {
+      type: 'delimiter',
+      delimiterFormat: 'text',
+      delimiter: '0D0A',
+      includeDelimiter: false,
+    } as const;
+
+    expect(createFramer(config).push(Buffer.from('a\r\nb', 'utf8'))).toEqual([]);
+    expect(
+      createFramer(config)
+        .push(Buffer.from('a0D0Ab', 'utf8'))
+        .map((item) => item.toString('utf8')),
+    ).toEqual(['a']);
+  });
+
+  it('matches a multi-byte UTF-8 delimiter split across chunks', () => {
+    const delimiter = Buffer.from('帧', 'utf8');
+    const framer = createFramer({
+      type: 'delimiter',
+      delimiterFormat: 'text',
+      delimiter: '帧',
+      includeDelimiter: false,
+    });
+
+    expect(framer.push(Buffer.from('a', 'utf8'))).toEqual([]);
+    expect(framer.push(delimiter.subarray(0, 1))).toEqual([]);
+    const frames = framer.push(
+      Buffer.concat([delimiter.subarray(1), Buffer.from('b', 'utf8'), delimiter]),
+    );
+    expect(frames.map((item) => item.toString('utf8'))).toEqual(['a', 'b']);
+  });
+
+  it('keeps legacy hex configs without a format working', () => {
+    const legacy = {
+      type: 'delimiter',
+      delimiter: '7c',
+      includeDelimiter: false,
+    } as unknown as Parameters<typeof createFramer>[0];
+    const framer = createFramer(legacy);
+    expect(
+      framer
+        .push(Buffer.from('x|y|', 'utf8'))
+        .map((item) => item.toString('utf8')),
+    ).toEqual(['x', 'y']);
+  });
+
+  it('rejects empty text and invalid hex delimiters', () => {
+    expect(() =>
+      createFramer({
+        type: 'delimiter',
+        delimiterFormat: 'text',
+        delimiter: '',
+        includeDelimiter: false,
+      }),
+    ).toThrow(FramingError);
+    expect(() =>
+      createFramer({
+        type: 'delimiter',
+        delimiterFormat: 'hex',
+        delimiter: '0D0',
+        includeDelimiter: false,
+      }),
+    ).toThrow(FramingError);
   });
 });
 

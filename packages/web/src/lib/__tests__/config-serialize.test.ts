@@ -78,6 +78,25 @@ describe('stringifyDeviceConfig', () => {
       tnsImei: 'DEMO-TNS-0001',
     });
   });
+
+  it('round-trips text delimiters with control characters', () => {
+    for (const delimiter of ['|', '\r\n', '\\', '\0', '\n']) {
+      const withDelimiter: DeviceConfig = {
+        ...config,
+        framing: {
+          type: 'delimiter',
+          delimiterFormat: 'text',
+          delimiter,
+          includeDelimiter: false,
+        },
+      };
+      const yaml = stringifyDeviceConfig(withDelimiter);
+      expect(YAML.parse(yaml).framing).toEqual(withDelimiter.framing);
+
+      const json = stringifyJsonValue(withDelimiter);
+      expect(JSON.parse(json).framing).toEqual(withDelimiter.framing);
+    }
+  });
 });
 
 describe('stringifyJsonValue', () => {

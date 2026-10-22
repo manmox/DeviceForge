@@ -37,7 +37,8 @@ describe('framing defaults', () => {
     expect(defaultFraming('raw')).toEqual({ type: 'raw' });
     expect(defaultFraming('delimiter')).toEqual({
       type: 'delimiter',
-      delimiter: '0D0A',
+      delimiterFormat: 'text',
+      delimiter: '\r\n',
       includeDelimiter: false,
     });
     expect(defaultFraming('length-prefix')).toMatchObject({
@@ -57,6 +58,9 @@ describe('framing defaults', () => {
     expect(changeFramingType(current, 'length-prefix')).toBe(current);
     expect(changeFramingType(current, 'raw')).toEqual({ type: 'raw' });
     expect(changeFramingType(current, 'fixed')).toEqual({ type: 'fixed', length: 16 });
+    expect(changeFramingType({ type: 'raw' }, 'delimiter')).toEqual(
+      defaultFraming('delimiter'),
+    );
   });
 });
 

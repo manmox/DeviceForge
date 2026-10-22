@@ -159,9 +159,23 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 | `framing.type` | 说明 |
 | --- | --- |
 | `raw` | 每个 TCP 数据块当作一帧；适合已经按消息边界读取的场景，或在 `tcp-echo` 预设中观察原始数据 |
-| `delimiter` | 按十六进制分隔符切分，例如 CRLF 是 `"0D0A"`；`includeDelimiter` 控制是否保留分隔符 |
+| `delimiter` | 按分隔符切分；`delimiterFormat: text` 时 `delimiter` 是 UTF-8 文本（如 `"|"`、`"\r\n"`），`hex` 时是十六进制（如 `"7C"`、`"0D0A"`）；省略格式按 `hex` 兼容旧配置。`includeDelimiter` 控制是否保留分隔符 |
 | `length-prefix` | 从指定偏移读取 1/2/4 字节长度，`adjust` 用于修正“长度是否包含头/CRC” |
 | `fixed` | 固定帧长，不足时等待后续数据 |
+
+文本分隔符示例：
+
+```yaml
+framing:
+  type: delimiter
+  delimiterFormat: text
+  delimiter: "|"        # 匹配 0x7C
+  includeDelimiter: false
+```
+
+- CRLF 写作 `delimiter: "\r\n"`。YAML 双引号会解析转义；单引号或不加引号的 `\r\n` 是字面反斜杠字符。`|`、`*`、`#` 等 YAML 特殊字符建议始终加引号。
+- 文本模式按 UTF-8 编码。可视化表单支持 `\r`、`\n`、`\t`、`\0`、`\\`、`\xNN`；`\xNN` 表示 Unicode 码位 0x00-0xFF，不是原始字节，例如 `\x80` 编码为 `C2 80`。
+- 文本模式中的 `"0D0A"` 是 4 个 ASCII 字符；需要原始字节 `0D 0A` 时请使用 HEX 模式。源码模式不做应用层转义解析。
 
 ### 字段选项
 
@@ -283,7 +297,7 @@ pnpm start           # 生产模式（需要先 build）
 
 - CRC/校验和已知向量（CRC16/MODBUS `123456789 → 0x4B37` 等）
 - length-prefix 半包、粘包、多帧、超长帧
-- delimiter、fixed、raw 分帧
+- delimiter（hex/text 分隔符、UTF-8 多字节跨包）、fixed、raw 分帧
 - 字段编解码回环、CRC 校验失败、固定长度/剩余长度/fromField
 - 模板求值（路径、算术、比较、布尔函数、插值扫描、错误和限制）、模板补全 token/候选/插入，以及字段匹配
 - 真实 `node:net` 客户端连 TCP 设备：握手、请求响应、手动发送、错误 CRC 不触发规则

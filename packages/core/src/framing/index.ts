@@ -1,4 +1,4 @@
-import type { FramingConfig } from '../schema/device';
+import type { DelimiterFormat, FramingConfig } from '../schema/device';
 
 export interface FrameDecoder {
   push(chunk: Buffer): Buffer[];
@@ -37,8 +37,19 @@ class DelimiterFramer implements FrameDecoder {
   private readonly delimiter: Buffer;
   private readonly includeDelimiter: boolean;
 
-  constructor(delimiterHex: string, includeDelimiter: boolean) {
-    this.delimiter = Buffer.from(delimiterHex, 'hex');
+  constructor(
+    delimiterSource: string,
+    format: DelimiterFormat,
+    includeDelimiter: boolean,
+  ) {
+    if (format === 'text') {
+      this.delimiter = Buffer.from(delimiterSource, 'utf8');
+    } else {
+      if (!/^(?:[0-9a-fA-F]{2})+$/.test(delimiterSource)) {
+        throw new FramingError('hex 分隔符必须是非空且偶数位的十六进制字符串');
+      }
+      this.delimiter = Buffer.from(delimiterSource, 'hex');
+    }
     this.includeDelimiter = includeDelimiter;
     if (this.delimiter.length === 0) throw new FramingError('分隔符不能为空');
   }
@@ -176,7 +187,11 @@ export function createFramer(config: FramingConfig): FrameDecoder {
     case 'raw':
       return new RawFramer();
     case 'delimiter':
-      return new DelimiterFramer(config.delimiter, config.includeDelimiter);
+      return new DelimiterFramer(
+        config.delimiter,
+        config.delimiterFormat ?? 'hex',
+        config.includeDelimiter,
+      );
     case 'fixed':
       return new FixedFramer(config.length);
     case 'length-prefix':

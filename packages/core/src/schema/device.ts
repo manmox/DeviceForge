@@ -21,17 +21,42 @@ export const LengthFieldSchema = z.object({
   adjust: z.number().int().default(0),
 });
 
+export const DelimiterFormatSchema = z.enum(['text', 'hex']);
+export type DelimiterFormat = z.infer<typeof DelimiterFormatSchema>;
+
+export const DelimiterFramingSchema = z
+  .object({
+    type: z.literal('delimiter'),
+    delimiterFormat: DelimiterFormatSchema.default('hex'),
+    delimiter: z.string(),
+    includeDelimiter: z.boolean().default(false),
+  })
+  .superRefine((framing, ctx) => {
+    if (framing.delimiterFormat === 'hex') {
+      if (!/^(?:[0-9a-fA-F]{2})+$/.test(framing.delimiter)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['delimiter'],
+          message:
+            'hex 分隔符必须是不含空格的偶数位十六进制（如 "0D0A"）；文本分隔符请设置 delimiterFormat: text',
+        });
+      }
+      return;
+    }
+    if (framing.delimiter.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['delimiter'],
+        message: '文本分隔符不能为空',
+      });
+    }
+  });
+
 export const FramingSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('raw'),
   }),
-  z.object({
-    type: z.literal('delimiter'),
-    delimiter: z
-      .string()
-      .regex(/^(?:[0-9a-fA-F]{2})+$/, 'delimiter 必须是不含空格的偶数位十六进制，例如 "0D0A"'),
-    includeDelimiter: z.boolean().default(false),
-  }),
+  DelimiterFramingSchema,
   z.object({
     type: z.literal('length-prefix'),
     lengthField: LengthFieldSchema,

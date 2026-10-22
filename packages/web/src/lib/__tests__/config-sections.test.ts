@@ -98,6 +98,44 @@ describe('sectionHint', () => {
     expect(sectionHint(config, 'rules')).toBe('0 条规则');
   });
 
+  it('summarizes text and hex delimiters readably', () => {
+    const textFraming = {
+      type: 'delimiter',
+      delimiterFormat: 'text',
+      delimiter: '|',
+      includeDelimiter: false,
+    } as const;
+    expect(
+      sectionHint({ ...config, framing: textFraming }, 'framing'),
+    ).toBe('分隔符 「|」');
+
+    const crlfFraming = {
+      ...textFraming,
+      delimiter: '\r\n',
+    } as const;
+    expect(
+      sectionHint({ ...config, framing: crlfFraming }, 'framing'),
+    ).toBe('分隔符 「\\r\\n」');
+
+    const emptyFraming = {
+      ...textFraming,
+      delimiter: '',
+    } as const;
+    expect(
+      sectionHint({ ...config, framing: emptyFraming }, 'framing'),
+    ).toBe('分隔符 「(空)」');
+
+    const hexFraming = {
+      type: 'delimiter',
+      delimiterFormat: 'hex',
+      delimiter: '0d0a',
+      includeDelimiter: false,
+    } as const;
+    expect(
+      sectionHint({ ...config, framing: hexFraming }, 'framing'),
+    ).toBe('分隔符 0D0A');
+  });
+
   it('shows an empty hint when deviceInfo is absent', () => {
     expect(sectionHint({ ...config, deviceInfo: undefined }, 'deviceInfo')).toBe(
       '未填写',

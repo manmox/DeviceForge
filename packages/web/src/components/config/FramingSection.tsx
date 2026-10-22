@@ -1,12 +1,27 @@
-import type { DeviceConfig, FramingConfig } from '@deviceforge/core';
+import type {
+  DelimiterFormat,
+  DeviceConfig,
+  FramingConfig,
+} from '@deviceforge/core';
 import { Ruler } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { changeFramingType } from '../../lib/config-defaults';
+import {
+  TEXT_DELIMITER_PRESETS,
+  delimiterTextBytes,
+  delimiterTextToHex,
+  escapeDelimiterText,
+  formatHexBytes,
+  hexToDelimiterText,
+  parseDelimiterText,
+} from '../../lib/delimiter';
 import { hexToBytes } from '../../lib/format';
 import { useIssueText } from '../form/ConfigIssuesContext';
 import {
   FormField,
   InlineWarning,
   NumberInput,
+  SegmentedControl,
   SelectInput,
   SwitchRow,
   TextInput,
@@ -24,6 +39,8 @@ const FRAMING_OPTIONS: SelectOption<FramingConfig['type']>[] = [
 const DELIMITER_PATTERN = /^(?:[0-9a-fA-F]{2})+$/;
 const MAX_FRAME_LENGTH = 16 * 1024 * 1024;
 
+type DelimiterFraming = Extract<FramingConfig, { type: 'delimiter' }>;
+
 export function FramingSection({
   config,
   onChange,
@@ -35,6 +52,7 @@ export function FramingSection({
 }) {
   const framing = config.framing;
   const delimiterError = useIssueText('framing.delimiter');
+  const delimiterFormatError = useIssueText('framing.delimiterFormat');
   const lengthFieldError = useIssueText('framing.lengthField');
   const maxFrameLengthError = useIssueText('framing.maxFrameLength');
   const fixedLengthError = useIssueText('framing.length');
@@ -73,51 +91,13 @@ export function FramingSection({
         )}
 
         {framing.type === 'delimiter' && (
-          <>
-            <FormField
-              label="分隔符（hex）"
-              required
-              error={delimiterError}
-              hint="偶数位十六进制，可带空格；例如 CRLF 是 0D0A。"
-            >
-              <TextInput
-                value={framing.delimiter}
-                onChange={(value) =>
-                  setFraming({ ...framing, delimiter: value.replace(/\s+/g, '') })
-                }
-                disabled={disabled}
-                monospace
-                placeholder="0D0A"
-              />
-            </FormField>
-            <div className="flex flex-col justify-end">
-              <div className="text-[10.5px] text-mist-500">
-                预览：
-                <span className="ml-1 font-mono text-mist-300">
-                  {hexToBytes(framing.delimiter)
-                    .map((byte) => byte.toString(16).padStart(2, '0').toUpperCase())
-                    .join(' ') || '—'}
-                </span>
-              </div>
-              <div className="mt-0.5 text-[10.5px] text-mist-500">
-                {hexToBytes(framing.delimiter).length} 字节
-              </div>
-            </div>
-            {!DELIMITER_PATTERN.test(framing.delimiter) && (
-              <div className="sm:col-span-2">
-                <InlineWarning>分隔符必须是非空的偶数位十六进制。</InlineWarning>
-              </div>
-            )}
-            <div className="sm:col-span-2">
-              <SwitchRow
-                label="保留分隔符"
-                hint="开启后分隔符会包含在交给 codec 的帧中。"
-                checked={framing.includeDelimiter}
-                onChange={(includeDelimiter) => setFraming({ ...framing, includeDelimiter })}
-                disabled={disabled}
-              />
-            </div>
-          </>
+          <DelimiterFramingFields
+            framing={framing}
+            onChange={setFraming}
+            disabled={disabled}
+            schemaError={delimiterError}
+            formatSchemaError={delimiterFormatError}
+          />
         )}
 
         {framing.type === 'length-prefix' && (
@@ -235,5 +215,237 @@ export function FramingSection({
         )}
       </div>
     </FormSection>
+  );
+}
+
+function DelimiterFramingFields({
+  framing,
+  onChange,
+  disabled,
+  schemaError,
+  formatSchemaError,
+}: {
+  framing: DelimiterFraming;
+  onChange: (next: FramingConfig) => void;
+  disabled: boolean;
+  schemaError?: string;
+  formatSchemaError?: string;
+}) {
+  const format = framing.delimiterFormat ?? 'hex';
+  const [draft, setDraft] = useState(() => escapeDelimiterText(framing.delimiter));
+  const [focused, setFocused] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focused) return;
+    setDraft(escapeDelimiterText(framing.delimiter));
+    setParseError(null);
+  }, [framing.delimiter, format, focused]);
+
+  useEffect(() => {
+    setSwitchError(null);
+  }, [framing.delimiter, format]);
+
+  function setText(text: string) {
+    onChange({ ...framing, delimiterFormat: 'text', delimiter: text });
+  }
+
+  function handleTextChange(next: string) {
+    setDraft(next);
+    const parsed = parseDelimiterText(next);
+    if (!parsed.ok) {
+      setParseError(parsed.error);
+      return;
+    }
+    setParseError(null);
+    if (parsed.text !== framing.delimiter) setText(parsed.text);
+  }
+
+  function applyPreset(text: string) {
+    setDraft(escapeDelimiterText(text));
+    setParseError(null);
+    setSwitchError(null);
+    setText(text);
+  }
+
+  function switchFormat(next: DelimiterFormat) {
+    if (next === format || disabled) return;
+    setSwitchError(null);
+    setParseError(null);
+
+    if (next === 'hex') {
+      onChange({
+        ...framing,
+        delimiterFormat: 'hex',
+        delimiter: delimiterTextToHex(framing.delimiter),
+      });
+      return;
+    }
+
+    const decoded = hexToDelimiterText(framing.delimiter);
+    if (decoded.ok) {
+      setDraft(escapeDelimiterText(decoded.text));
+      onChange({
+        ...framing,
+        delimiterFormat: 'text',
+        delimiter: decoded.text,
+      });
+      return;
+    }
+
+    if (decoded.reason === 'invalid-hex') {
+      setDraft('');
+      onChange({
+        ...framing,
+        delimiterFormat: 'text',
+        delimiter: '',
+      });
+      return;
+    }
+
+    setSwitchError(
+      '当前 HEX 字节不是合法 UTF-8，无法无损转换为文本；请先修改字节，或清空后再切换。',
+    );
+  }
+
+  const isText = format === 'text';
+  const textBytes = isText ? delimiterTextBytes(framing.delimiter) : null;
+  const hexBytes = isText ? null : hexToBytes(framing.delimiter);
+  const previewBytes = textBytes ?? hexBytes ?? [];
+  const previewHex = formatHexBytes(previewBytes);
+  const decodedHex = isText ? null : hexToDelimiterText(framing.delimiter);
+  const hexTextPreview = decodedHex?.ok
+    ? escapeDelimiterText(decodedHex.text) || '—'
+    : decodedHex?.reason === 'invalid-utf8'
+      ? '非 UTF-8 字节'
+      : '—';
+
+  return (
+    <>
+      <div className="flex flex-col">
+        <span className="mb-1 text-[11px] font-medium text-mist-400">分隔符格式</span>
+        <SegmentedControl<DelimiterFormat>
+          value={format}
+          options={[
+            { value: 'text', label: '文本（UTF-8）' },
+            { value: 'hex', label: 'HEX' },
+          ]}
+          onChange={switchFormat}
+          disabled={disabled}
+          size="sm"
+          ariaLabel="分隔符格式"
+        />
+        {formatSchemaError && (
+          <span className="mt-1 block text-[10.5px] leading-4 text-rose-300">
+            {formatSchemaError}
+          </span>
+        )}
+      </div>
+
+      {isText ? (
+        <FormField
+          label="分隔符（文本）"
+          required
+          error={parseError ?? schemaError}
+          hint={'按 UTF-8 编码；支持 \\r、\\n、\\t、\\0、\\\\、\\xNN。文本中的 "0D0A" 是 4 个 ASCII 字符。'}
+        >
+          <TextInput
+            value={draft}
+            onChange={handleTextChange}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            disabled={disabled}
+            monospace
+            placeholder={'\\r\\n 或 |'}
+          />
+        </FormField>
+      ) : (
+        <FormField
+          label="分隔符（HEX）"
+          required
+          error={schemaError}
+          hint="偶数位十六进制，可带空格；例如 CRLF 是 0D0A。"
+        >
+          <TextInput
+            value={framing.delimiter}
+            onChange={(value) => {
+              setSwitchError(null);
+              onChange({
+                ...framing,
+                delimiter: value.replace(/\s+/g, ''),
+              });
+            }}
+            disabled={disabled}
+            monospace
+            placeholder="0D0A"
+          />
+        </FormField>
+      )}
+
+      {isText && (
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10.5px] text-mist-500">常用：</span>
+          {TEXT_DELIMITER_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="chip transition-colors hover:border-white/20 hover:text-mist-200 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => applyPreset(preset.text)}
+              disabled={disabled}
+              title={escapeDelimiterText(preset.text)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isText && framing.delimiter.length === 0 && !schemaError && !parseError && (
+        <div className="sm:col-span-2">
+          <InlineWarning>分隔符不能为空。</InlineWarning>
+        </div>
+      )}
+
+      {!isText && !DELIMITER_PATTERN.test(framing.delimiter) && (
+        <div className="sm:col-span-2">
+          <InlineWarning>分隔符必须是非空的偶数位十六进制。</InlineWarning>
+        </div>
+      )}
+
+      {switchError && (
+        <div className="sm:col-span-2">
+          <InlineWarning>{switchError}</InlineWarning>
+        </div>
+      )}
+
+      <div className="sm:col-span-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[10.5px] leading-5 text-mist-500">
+        <div>
+          {isText ? 'UTF-8 字节' : 'HEX 字节'}：
+          <span className="ml-1 font-mono text-mist-300">
+            {previewHex || '—'}
+          </span>
+          <span className="ml-2">· {previewBytes.length} 字节</span>
+        </div>
+        {!isText && (
+          <div className="mt-0.5">
+            文本：
+            <span className="ml-1 font-mono text-mist-300">
+              {hexTextPreview}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="sm:col-span-2">
+        <SwitchRow
+          label="保留分隔符"
+          hint="开启后分隔符会包含在交给 codec 的帧中。"
+          checked={framing.includeDelimiter}
+          onChange={(includeDelimiter) => onChange({ ...framing, includeDelimiter })}
+          disabled={disabled}
+        />
+      </div>
+    </>
   );
 }

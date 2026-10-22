@@ -1,4 +1,5 @@
 import type { DeviceConfig } from '@deviceforge/core';
+import { escapeDelimiterText } from './delimiter';
 import { deviceInfoHint } from './device-info';
 
 export type ConfigSectionId =
@@ -120,8 +121,12 @@ export function sectionHint(config: DeviceConfig, id: ConfigSectionId): string {
       switch (config.framing.type) {
         case 'raw':
           return '原始字节';
-        case 'delimiter':
-          return `分隔符 ${config.framing.delimiter.toUpperCase()}`;
+        case 'delimiter': {
+          const { delimiter, delimiterFormat } = config.framing;
+          return (delimiterFormat ?? 'hex') === 'text'
+            ? `分隔符 「${escapeDelimiterText(delimiter) || '(空)'}」`
+            : `分隔符 ${delimiter.toUpperCase()}`;
+        }
         case 'length-prefix':
           return '长度字段';
         case 'fixed':
