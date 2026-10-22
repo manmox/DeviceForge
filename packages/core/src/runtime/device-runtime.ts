@@ -346,6 +346,8 @@ export class DeviceRuntime {
     }
   }
 
+  // 每个连接一条 Promise 链，保证异步规则处理仍按报文到达顺序执行；
+  // catch 留在链内，单帧失败不会中断后续帧。
   private enqueueFrame(connectionId: string, frame: Buffer): void {
     const previous = this.frameQueues.get(connectionId) ?? Promise.resolve();
     const next = previous

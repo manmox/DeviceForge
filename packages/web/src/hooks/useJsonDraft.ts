@@ -66,8 +66,8 @@ export function useJsonDraft<T extends Record<string, unknown>>(
     setText(stringifyJsonValue(baseline));
     valueMatchesTextRef.current = true;
     setError(null);
-    // The key is the external-baseline change detector; the object identity of
-    // baseline is intentionally not a dependency to avoid resets on re-render.
+    // 用 key 检测外部 baseline 变化；不把 baseline 的对象引用作为依赖，
+    // 避免重渲染时重置。
   }, [baselineKey]);
 
   const updateValue = useCallback((next: T) => {

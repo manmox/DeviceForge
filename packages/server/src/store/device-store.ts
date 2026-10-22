@@ -55,6 +55,8 @@ export class DeviceStore {
     return deleted;
   }
 
+  // 单条无效设备配置跳过，避免一条坏数据阻塞启动；整个存储文件损坏时
+  // 先备份，再以空集合继续运行。
   private load(): void {
     if (!existsSync(this.filePath)) return;
 
@@ -74,12 +76,14 @@ export class DeviceStore {
       try {
         copyFileSync(this.filePath, backup);
       } catch {
-        // ignore backup failure
+        // 备份失败可忽略
       }
       console.error(`[store] 读取 ${this.filePath} 失败，已备份到 ${backup}`, error);
     }
   }
 
+  // 先写同目录临时文件再 rename；同目录 rename 是原子操作，崩溃时不会
+  // 留下截断的 devices.json。
   private save(): void {
     mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.tmp`;

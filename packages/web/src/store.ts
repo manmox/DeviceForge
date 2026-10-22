@@ -76,6 +76,8 @@ function withStatus(
   };
 }
 
+// WS 事件可能早于或晚于 REST 快照到达；按事件 id 去重，并沿用加载设备时
+// 的 2000 条上限。
 function mergeTraffic(current: TrafficEvent[], incoming: TrafficEvent[]): TrafficEvent[] {
   const seen = new Set(current.map((event) => event.id));
   const fresh = incoming.filter((event) => !seen.has(event.id));
@@ -136,6 +138,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const detail = await api.getDevice(id);
       if (get().selectedId !== id) return;
 
+      // REST 快照与实时 WS 事件可能发生竞态；按 id 合并后按时间排序，
+      // 避免重连期间重复或乱序。
       const previous = get().traffic;
       const known = new Set(detail.traffic.map((event) => event.id));
       const merged = [

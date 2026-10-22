@@ -50,6 +50,8 @@ export async function registerConfigRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(422).send({ error: '配置校验失败', issues: issuesOf(parsed.error) });
     }
 
+    // 成功时返回经 Zod 归一化的完整配置（默认值已补齐），不是布尔值；可视化
+    // 编辑器会用该值替换草稿。校验失败返回 422。
     return { config: parsed.data };
   });
 

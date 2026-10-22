@@ -16,9 +16,9 @@ export type TemplatePart =
   | { kind: 'expression'; source: string; start: number; end: number };
 
 /**
- * Split a string into literal text and `${...}` expressions. Quotes are
- * respected so `"a}b"` does not close an expression early. Unclosed and
- * whitespace-only interpolations stay literal, matching the old regex behavior.
+ * 把字符串拆成字面文本和 `${...}` 表达式。扫描会识别引号，
+ * 因此 `"a}b"` 不会提前结束表达式。未闭合和只含空白的插值
+ * 仍按字面量处理，与旧正则行为一致。
  */
 export function scanTemplateParts(value: string): TemplatePart[] {
   const parts: TemplatePart[] = [];
@@ -133,6 +133,7 @@ function evaluateString(value: string, ctx: TemplateContext): unknown {
 export function evaluate(value: unknown, ctx: TemplateContext): unknown {
   if (typeof value === 'string') return evaluateString(value, ctx);
   if (Array.isArray(value)) return value.map((item) => evaluate(item, ctx));
+  // Buffer 作为叶子节点处理；递归会把字节展开成数字键属性。
   if (value !== null && typeof value === 'object' && !Buffer.isBuffer(value)) {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {

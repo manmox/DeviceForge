@@ -32,7 +32,7 @@ export function connectWs(): void {
       const message = JSON.parse(String(event.data)) as WsMessage;
       useAppStore.getState().handleWsMessage(message);
     } catch {
-      // ignore malformed frames
+      // 忽略无法解析的帧
     }
   });
 

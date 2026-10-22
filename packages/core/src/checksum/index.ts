@@ -37,12 +37,12 @@ export function xor8(data: Buffer): number {
   return value & 0xff;
 }
 
-/** Modbus ASCII LRC: two's complement of the 8-bit sum. */
+/** Modbus ASCII LRC：8 位累加和的二进制补码。 */
 export function lrc(data: Buffer): number {
   return (-sum8(data) + 0x100) & 0xff;
 }
 
-/** CRC-8/ATM: poly 0x07, init 0x00, xorout 0x00. */
+/** CRC-8/ATM：多项式 0x07，初值 0x00，结果异或 0x00。 */
 export function crc8(data: Buffer): number {
   let crc = 0;
   for (const byte of data) {
@@ -54,7 +54,7 @@ export function crc8(data: Buffer): number {
   return crc;
 }
 
-/** CRC-16/MODBUS: poly 0xA001 (reflected), init 0xFFFF, xorout 0x0000. */
+/** CRC-16/MODBUS：反射多项式 0xA001，初值 0xFFFF，结果异或 0x0000。 */
 export function crc16Modbus(data: Buffer): number {
   let crc = 0xffff;
   for (const byte of data) {
@@ -66,7 +66,7 @@ export function crc16Modbus(data: Buffer): number {
   return crc & 0xffff;
 }
 
-/** CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, xorout 0x0000. */
+/** CRC-16/CCITT-FALSE：多项式 0x1021，初值 0xFFFF，结果异或 0x0000。 */
 export function crc16Ccitt(data: Buffer): number {
   let crc = 0xffff;
   for (const byte of data) {
@@ -78,7 +78,7 @@ export function crc16Ccitt(data: Buffer): number {
   return crc & 0xffff;
 }
 
-/** CRC-32/ISO-HDLC (Ethernet / zip): poly 0xEDB88320, init 0xFFFFFFFF, xorout 0xFFFFFFFF. */
+/** CRC-32/ISO-HDLC（Ethernet / zip）：反射多项式 0xEDB88320，初值 0xFFFFFFFF，结果异或 0xFFFFFFFF。 */
 export function crc32(data: Buffer): number {
   let crc = 0xffffffff;
   for (const byte of data) {

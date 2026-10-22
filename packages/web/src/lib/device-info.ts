@@ -61,8 +61,7 @@ function hasValue(value: string | undefined): value is string {
 }
 
 /**
- * Updates one metadata field, drops blank values, and removes the whole
- * `deviceInfo` block when nothing remains.
+ * 更新一个元数据字段，丢弃空值；没有剩余字段时删除整个 `deviceInfo` 块。
  */
 export function updateDeviceInfoField(
   config: DeviceConfig,

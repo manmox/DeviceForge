@@ -29,6 +29,8 @@ export class WsHub {
 
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
     this.heartbeatTimer = setInterval(() => {
+      // alive 表示“上一次 ping 之后收到过 pong”。每轮先终止未回应的连接，
+      // 再清除标记并 ping 其余连接。
       for (const socket of this.wss.clients) {
         if (!this.alive.has(socket)) {
           socket.terminate();
@@ -83,6 +85,8 @@ export class WsHub {
     const data = JSON.stringify({ type, payload });
     for (const socket of this.wss.clients) {
       if (socket.readyState !== WebSocket.OPEN) continue;
+      // 对缓冲超过上限的慢客户端直接丢弃流量，避免无限积压；它们会在下一次
+      // 状态事件或重连快照时恢复。
       if (socket.bufferedAmount > MAX_BUFFERED_BYTES) continue;
       socket.send(data, (error) => {
         if (error) socket.terminate();

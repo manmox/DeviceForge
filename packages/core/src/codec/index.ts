@@ -194,6 +194,7 @@ function fieldSizeForDecode(
   }
   if (typeof field.length === 'number') return field.length;
   if (field.length === 'remaining') {
+    // 校验和尾部已由 payloadEnd 排除；这里只需为后续字段预留固定长度。
     let reserved = 0;
     for (const later of laterFields) {
       const size = fixedSizeOf(later);
@@ -333,6 +334,8 @@ class FieldsCodec implements Codec {
       return { fields: {}, valid: false, error: '帧长度小于校验字段长度' };
     }
 
+    // 解析字段前先预留校验和尾部，确保长度字段和 remaining 不会把校验和
+    // 算进载荷。
     const payloadEnd = frame.length - checksumBytes;
     const fields: Record<string, unknown> = {};
     const warnings: string[] = [];
@@ -387,6 +390,8 @@ class FieldsCodec implements Codec {
       const result = verifyChecksum(this.config.checksum.algo, frame, this.config.checksum.endian);
       fields._checksum = result.actual;
       fields._checksumValid = result.valid;
+      // 只有启用 verify 的校验和不匹配才会让整帧无效；常量不匹配和尾部
+      // 多余字节只记 warning，规则仍可执行。
       if (!result.valid) {
         const message = `校验失败：期望 0x${result.expected.toString(16)}，实际 0x${result.actual.toString(16)}`;
         if (this.config.checksum.verify) {
@@ -452,6 +457,8 @@ class FieldsCodec implements Codec {
       offset += buffer.length;
     }
 
+    // calc 字段先填零占位，因为值依赖最终布局。totalLength 包含尾部校验和，
+    // 而校验和只覆盖 body，并在该阶段之后追加。
     const total = offset + checksumBytes;
     for (const chunk of chunks) {
       if (chunk.field.calc === undefined) continue;
@@ -476,7 +483,7 @@ export function createCodec(config: CodecConfig): Codec {
   }
 }
 
-/** Best-effort decode used only for display of outbound frames. */
+/** 仅用于出站帧展示的容错解码。 */
 export function tryDecode(codec: Codec, frame: Buffer): DecodeResult | undefined {
   try {
     return codec.decode(frame);

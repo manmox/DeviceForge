@@ -218,6 +218,7 @@ export function FramingSection({
   );
 }
 
+// 单独抽组件：切换 framing.type 时随之卸载，draft/error 不会残留在其他分帧方式里。
 function DelimiterFramingFields({
   framing,
   onChange,
@@ -237,6 +238,8 @@ function DelimiterFramingFields({
   const [parseError, setParseError] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
 
+  // draft 是输入框里的转义显示值，framing.delimiter 是规范文本。聚焦时不要
+  // 用配置覆盖 draft，否则输入 \r 等转义中间态会被打断、光标也会跳走。
   useEffect(() => {
     if (focused) return;
     setDraft(escapeDelimiterText(framing.delimiter));
@@ -269,6 +272,8 @@ function DelimiterFramingFields({
     setText(text);
   }
 
+  // 模式切换的不对称是有意的：text→HEX 总是无损；HEX→text 只接受严格 UTF-8。
+  // 非法 HEX 清空后切成文本，避免用户被困在 HEX；合法但非 UTF-8 则保持 HEX。
   function switchFormat(next: DelimiterFormat) {
     if (next === format || disabled) return;
     setSwitchError(null);

@@ -46,6 +46,8 @@ export function parseDelimiterText(input: string): ParsedDelimiterText {
         index += 1;
         break;
       case 'x': {
+        // \xNN 表示 Unicode 码位，不是原始字节：\x80 会变成 U+0080，
+        // 再按 UTF-8 编码为 C2 80。escapeDelimiterText 是其逆操作。
         const hex = input.slice(index + 2, index + 4);
         if (hex.length < 2) {
           return { ok: false, error: '\\x 后需要两位十六进制字符' };
@@ -70,6 +72,7 @@ export function parseDelimiterText(input: string): ParsedDelimiterText {
   return { ok: true, text: result };
 }
 
+/** 转义控制字符，保证文本输入框单行显示；满足 parse(escape(x)) === x。 */
 export function escapeDelimiterText(text: string): string {
   let result = '';
   for (const character of text) {
@@ -122,6 +125,11 @@ export function delimiterTextToHex(text: string): string {
   return formatHexBytes(delimiterTextBytes(text)).replace(/\s+/g, '');
 }
 
+/**
+ * 无损地把 HEX 解码为文本。fatal 会拒绝非法 UTF-8，而不是替换成 U+FFFD；
+ * ignoreBOM 保留开头 BOM，保证重新编码后字节一致。reason 用于区分 UI 的
+ * “清空”与“阻止切换”行为。
+ */
 export function hexToDelimiterText(hex: string): DecodedHexDelimiter {
   const normalized = hex.replace(/\s+/g, '');
   if (normalized.length === 0) return { ok: true, text: '' };

@@ -48,6 +48,9 @@ export function useDeviceConfigDraft(initial: {
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // versionRef 用于让编辑后返回的旧异步校验/切换结果失效；
+  // codeMatchesConfigRef 表示 YAML 是当前权威形式；switchingRef 保证异步
+  // 模式切换串行执行。
   const baselineRef = useRef({ config: initial.config, yaml });
   const codeMatchesConfigRef = useRef(true);
   const versionRef = useRef(0);

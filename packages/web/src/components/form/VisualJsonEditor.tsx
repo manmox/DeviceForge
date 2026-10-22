@@ -365,6 +365,8 @@ function JsonTypeValueEditor({
             )}
           </div>
         )}
+        {/* 数字字段无法直接输入 $；捕获 $ 和含模板的粘贴，切换成字符串表达式
+            并通过 focusRequest 聚焦新输入框。boolean/null 则用 fx 按钮。 */}
         {type === 'number' && (
           <div
             className="min-w-0 flex-1"

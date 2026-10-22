@@ -12,6 +12,8 @@ export const paths = {
   webDist: path.join(repoRoot, 'packages/web/dist'),
 };
 
+// 控制面没有认证/TLS，默认只绑定回环地址就是安全边界；绑定 0.0.0.0
+// 会把设备控制暴露到网络。
 export const control = {
   host: process.env.DEVICEFORGE_HOST ?? '127.0.0.1',
   port: Number(process.env.DEVICEFORGE_PORT ?? 7321),

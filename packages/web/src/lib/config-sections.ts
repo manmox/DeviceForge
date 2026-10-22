@@ -143,7 +143,7 @@ export function sectionHint(config: DeviceConfig, id: ConfigSectionId): string {
   }
 }
 
-/** Extracts the item index from issue paths such as `rules.2.match`. */
+/** 从 `rules.2.match` 这类 issue path 中提取条目下标。 */
 export function issueItemIndex(path: string, prefix: string): number | null {
   if (!path.startsWith(`${prefix}.`)) return null;
   const segment = path.slice(prefix.length + 1).split('.')[0];

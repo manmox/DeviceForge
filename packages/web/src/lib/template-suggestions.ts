@@ -19,15 +19,15 @@ export interface TemplateCompletionContext {
   codec?: CodecConfig;
   state?: Record<string, unknown>;
   counters?: readonly ('tx' | 'rx')[];
-  /** Default 4. */
+  /** 默认值 4。 */
   maxStateDepth?: number;
-  /** Default 200. */
+  /** 默认值 200。 */
   maxItems?: number;
 }
 
 export interface TemplateCompletionToken {
   mode: 'bare' | 'expression';
-  /** The bare token is embedded in other text and must be wrapped in `${...}`. */
+  /** 裸 token 嵌在其他文本中，插入时需要包一层 `${...}`。 */
   wrap: boolean;
   wordStart: number;
   wordEnd: number;
@@ -37,7 +37,7 @@ export interface TemplateCompletionToken {
   segment: string;
   dollar: boolean;
   complete: boolean;
-  /** The expression has no closing `}` and can be completed automatically. */
+  /** 表达式缺少闭合 `}`，可以自动补全。 */
   needsClosing: boolean;
 }
 
@@ -570,6 +570,8 @@ export function applyTemplateSuggestion(
   return { value: next, caret, reopen: suggestion.reopen };
 }
 
+// 引号和转义扫描必须与 core 的 scanTemplateParts 保持一致；字符串字面量
+// 内部同样不提供补全。
 function findExpressionEnd(value: string, start: number): number {
   let quote: '"' | "'" | null = null;
   let escaped = false;
@@ -646,6 +648,11 @@ function isNumericWord(word: string): boolean {
   return /^(?:\d|\.\d)/.test(word) || /^[0-9.]+$/.test(word);
 }
 
+/**
+ * 找到光标所在的路径 token。裸 `$` token 在插入时会包成 `${...}`；
+ * `${...}` 内的 token 保持在原表达式里。`needsClosing` 表示接受建议时
+ * 需要补上缺失的 `}`。
+ */
 export function findTemplateCompletionToken(
   value: string,
   caret: number,

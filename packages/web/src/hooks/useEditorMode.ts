@@ -10,7 +10,7 @@ function readMode(key: string, fallback: EditorMode): EditorMode {
     const value = window.localStorage.getItem(key);
     if (value === 'visual' || value === 'code') return value;
   } catch {
-    // localStorage can be unavailable in private or restricted contexts.
+    // 隐私模式或受限环境可能无法访问 localStorage。
   }
   return fallback;
 }
@@ -29,7 +29,7 @@ export function useEditorMode(
       try {
         window.localStorage.setItem(storageKey, next);
       } catch {
-        // Ignore storage failures; the in-memory mode still works.
+        // 忽略存储失败；内存中的模式仍然可用。
       }
     },
     [storageKey],

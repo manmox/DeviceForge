@@ -471,6 +471,8 @@ function requireComparableEquality(left: unknown, right: unknown): void {
   }
 }
 
+// 模板路径只读取自有属性，并屏蔽原型键。未知根会报错，但嵌套路径缺失时
+// 返回 undefined；$now 是叶子，不能再继续取成员。
 function resolvePath(parts: string[], context: TemplateContext): unknown {
   const root = parts[0]!;
   if (!ROOTS.has(root)) {
@@ -520,6 +522,8 @@ function evaluateNode(node: ExprNode, context: TemplateContext): unknown {
       return node.op === '-' ? -number : number;
     }
     case 'binary': {
+      // 与 JS 不同，&& 和 || 会短路并统一返回布尔值；左侧已决定结果时
+      // 不计算右侧。
       if (node.op === '&&') {
         if (!truthy(evaluateNode(node.left, context))) return false;
         return truthy(evaluateNode(node.right, context));

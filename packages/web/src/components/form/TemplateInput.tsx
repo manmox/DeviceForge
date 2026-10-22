@@ -68,6 +68,8 @@ export function TemplateInput({
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
+  // pendingCaret 要在受控 value 提交后的 layout effect 中恢复，否则 React 会重置选区；
+  // composingRef 用于跳过输入法组合期间的补全按键。
   const pendingCaret = useRef<number | null>(null);
   const composingRef = useRef(false);
   const lastFocusRequestRef = useRef<number | null>(null);

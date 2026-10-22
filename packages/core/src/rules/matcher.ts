@@ -1,5 +1,7 @@
 import type { MatchValue } from '../schema/device';
 
+// 形如十六进制的字符串按大小写不敏感比较，确保解码出的字节与配置中的 HEX
+// 匹配；普通字符串仍保持严格比较。
 function equalValues(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (typeof left === 'string' && typeof right === 'string') {

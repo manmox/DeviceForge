@@ -45,6 +45,8 @@ class DelimiterFramer implements FrameDecoder {
     if (format === 'text') {
       this.delimiter = Buffer.from(delimiterSource, 'utf8');
     } else {
+      // Buffer.from(..., 'hex') 遇到非法或奇数位会静默截断；先校验，
+      // 避免拼写错误变成一个更短的分隔符。
       if (!/^(?:[0-9a-fA-F]{2})+$/.test(delimiterSource)) {
         throw new FramingError('hex 分隔符必须是非空且偶数位的十六进制字符串');
       }
@@ -59,6 +61,8 @@ class DelimiterFramer implements FrameDecoder {
       this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
     }
 
+    // 在累积缓冲上匹配，因此被 TCP 包切开的多字节分隔符仍能命中。相邻分隔符
+    // 会产生空帧，这里有意丢弃；includeDelimiter 只决定返回帧是否包含分隔符。
     const frames: Buffer[] = [];
     let index = this.buffer.indexOf(this.delimiter);
     while (index !== -1) {
