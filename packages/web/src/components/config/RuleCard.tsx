@@ -7,7 +7,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { useId } from 'react';
+import { useId, type MouseEvent } from 'react';
 import { codecMatchFieldSuggestions, defaultFieldsForCodec } from '../../lib/codec-fields';
 import { ruleSummaryParts } from '../../lib/config-summary';
 import {
@@ -39,6 +39,9 @@ const TRIGGER_OPTIONS: SelectOption<RuleTrigger>[] = [
   { value: 'frame', label: '收到帧时' },
   { value: 'interval', label: '周期执行' },
 ];
+
+const HEADER_INTERACTIVE_SELECTOR =
+  'button, input, select, textarea, a, [contenteditable="true"], [role="switch"]';
 
 export function RuleCard({
   rule,
@@ -81,6 +84,24 @@ export function RuleCard({
     onChange({ ...rule, ...partial });
   }
 
+  function handleHeaderClick(event: MouseEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (target instanceof Element && target.closest(HEADER_INTERACTIVE_SELECTOR)) {
+      return;
+    }
+    // 拖选摘要文字后不应顺带展开/收起；只检查头部内部的选择。
+    const selection = window.getSelection();
+    if (
+      selection &&
+      !selection.isCollapsed &&
+      (event.currentTarget.contains(selection.anchorNode) ||
+        event.currentTarget.contains(selection.focusNode))
+    ) {
+      return;
+    }
+    onToggle();
+  }
+
   function unset(key: 'id' | 'name' | 'set' | 'send' | 'match'): Rule {
     const next = { ...rule };
     delete next[key];
@@ -113,10 +134,13 @@ export function RuleCard({
 
   return (
     <div
-      className="rounded-lg border border-white/10 bg-ink-900/40"
+      className="overflow-hidden rounded-lg border border-white/10 bg-ink-900/40"
       data-rule-index={index}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-2.5 py-2">
+      <div
+        className="flex cursor-pointer flex-wrap items-center gap-2 border-b border-white/10 px-2.5 py-2 transition-colors hover:bg-white/[0.03]"
+        onClick={handleHeaderClick}
+      >
         <IconButton
           label={open ? '收起规则' : '展开规则'}
           onClick={onToggle}
@@ -142,6 +166,7 @@ export function RuleCard({
               name.trim() === '' ? onChange(unset('name')) : patch({ name })
             }
             disabled={disabled}
+            className="cursor-text"
             placeholder="规则名称"
           />
         </div>
