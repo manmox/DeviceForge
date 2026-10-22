@@ -34,6 +34,8 @@ describe('isTemplateString', () => {
     expect(isTemplateString('$state.temp')).toBe(true);
     expect(isTemplateString('temp=${state.temp}')).toBe(true);
     expect(isTemplateString('plain text')).toBe(false);
+    expect(isTemplateString('$5.00')).toBe(false);
+    expect(isTemplateString('$unknown')).toBe(false);
     expect(isTemplateString(12)).toBe(false);
   });
 });

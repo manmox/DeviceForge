@@ -2,6 +2,7 @@ import { Check, Send } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useJsonDraft } from '../hooks/useJsonDraft';
 import { codecFieldSuggestions, defaultFieldsForCodec } from '../lib/codec-fields';
+import { templateRootsFor } from '../lib/template-suggestions';
 import { useAppStore } from '../store';
 import { CodeEditor } from './CodeEditor';
 import { EditorModeToggle } from './form/EditorModeToggle';
@@ -26,6 +27,14 @@ export function SendPanel() {
     baselineKey,
     noun: 'fields',
   });
+  const templateCompletion = useMemo(
+    () => ({
+      roots: templateRootsFor('manual-send'),
+      codec: device?.config.codec,
+      state: device?.state ?? device?.config.state ?? {},
+    }),
+    [device?.config.codec, device?.state, device?.config.state],
+  );
 
   const [payloadMode, setPayloadMode] = useState<'hex' | 'fields'>('hex');
   const [hexValue, setHexValue] = useState('');
@@ -145,7 +154,7 @@ export function SendPanel() {
               />
               <span className="text-[10.5px] text-mist-500">
                 {codec?.type === 'fields'
-                  ? '按 codec 字段填写；缺少必填字段发送会报错。'
+                  ? '按 codec 字段填写；值支持模板；缺少必填字段发送会报错。'
                   : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
               </span>
               <button
@@ -169,6 +178,7 @@ export function SendPanel() {
                   addLabel="添加字段"
                   emptyText="暂无字段"
                   templates
+                  completion={templateCompletion}
                   suggestions={codecFieldSuggestions(device.config.codec)}
                   disabled={sending}
                 />

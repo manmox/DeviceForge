@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   defaultValueForType,
   isTemplateString,
@@ -7,6 +7,7 @@ import {
   uniqueKey,
   type JsonValueType,
 } from '../../lib/json-value';
+import type { TemplateCompletionContext } from '../../lib/template-suggestions';
 import {
   IconButton,
   NumberInput,
@@ -14,6 +15,7 @@ import {
   TextInput,
   type SelectOption,
 } from './FormControls';
+import { TemplateInput, type TemplateFocusRequest } from './TemplateInput';
 
 export type JsonSuggestion = {
   name: string;
@@ -29,8 +31,13 @@ const TYPE_OPTIONS: SelectOption<JsonValueType>[] = [
   { value: 'array', label: '数组' },
 ];
 
+const FALLBACK_COMPLETION: TemplateCompletionContext = {
+  roots: ['state', 'counter', 'now'],
+};
+
 type SharedProps = {
   templates?: boolean;
+  completion?: TemplateCompletionContext;
   suggestions?: JsonSuggestion[];
   disabled?: boolean;
 };
@@ -42,6 +49,7 @@ export function VisualJsonEditor({
   addLabel = '添加字段',
   emptyText = '暂无字段',
   templates = false,
+  completion,
   suggestions,
   disabled = false,
   className = '',
@@ -64,13 +72,19 @@ export function VisualJsonEditor({
         addLabel={addLabel}
         emptyText={emptyText}
         templates={templates}
+        completion={completion}
         suggestions={suggestions}
         disabled={disabled}
       />
       {templates && (
         <p className="mt-2 text-[10.5px] leading-4 text-mist-500">
-          字符串支持模板：整值 <code className="kbd">$state.temp</code> 保留类型，
-          <code className="kbd">{'${...}'}</code> 插值会转成字符串。
+          输入 <code className="kbd">$</code> 或 <code className="kbd">{'${'}</code>{' '}
+          打开模板建议（Ctrl+Space 重新打开）。整值{' '}
+          <code className="kbd">$state.temp</code> 保留类型；
+          <code className="kbd">{'${...}'}</code>{' '}
+          支持 + - * / %、比较、&amp;&amp; || !、括号和
+          random/randomFloat/and/or/not。数字字段输入 $ 会转为表达式；布尔/null
+          可用 fx 按钮。
         </p>
       )}
     </div>
@@ -85,6 +99,7 @@ function ObjectEditor({
   addLabel,
   emptyText,
   templates,
+  completion,
   suggestions,
   disabled,
 }: {
@@ -169,6 +184,7 @@ function ObjectEditor({
                     onChange={(nextValue) => updateValue(key, nextValue)}
                     depth={depth}
                     templates={templates}
+                    completion={completion}
                     disabled={disabled}
                   />
                   <IconButton
@@ -203,12 +219,14 @@ function ArrayEditor({
   onChange,
   depth,
   templates,
+  completion,
   disabled,
 }: {
   value: unknown[];
   onChange: (next: unknown[]) => void;
   depth: number;
   templates?: boolean;
+  completion?: TemplateCompletionContext;
   disabled?: boolean;
 }) {
   function updateItem(index: number, nextValue: unknown) {
@@ -245,6 +263,7 @@ function ArrayEditor({
               onChange={(nextValue) => updateItem(index, nextValue)}
               depth={depth}
               templates={templates}
+              completion={completion}
               disabled={disabled}
             />
             <IconButton
@@ -276,18 +295,33 @@ function JsonTypeValueEditor({
   onChange,
   depth,
   templates,
+  completion,
   disabled,
 }: {
   value: unknown;
   onChange: (next: unknown) => void;
   depth: number;
   templates?: boolean;
+  completion?: TemplateCompletionContext;
   disabled?: boolean;
 }) {
   const type = jsonValueType(value);
+  const focusIdRef = useRef(0);
+  const [focusRequest, setFocusRequest] = useState<TemplateFocusRequest | undefined>();
+
+  useEffect(() => {
+    if (focusRequest && type === 'string') setFocusRequest(undefined);
+  }, [focusRequest, type]);
+
+  function switchToExpression(seed: string, caret: number) {
+    focusIdRef.current += 1;
+    setFocusRequest({ id: focusIdRef.current, caret, open: true });
+    onChange(seed);
+  }
 
   function changeType(nextType: JsonValueType) {
     if (nextType === type) return;
+    setFocusRequest(undefined);
     onChange(defaultValueForType(nextType));
   }
 
@@ -304,27 +338,62 @@ function JsonTypeValueEditor({
       <div className="min-w-0 flex-1">
         {type === 'string' && (
           <div className="flex min-w-0 items-center gap-1.5">
-            <TextInput
-              value={value as string}
-              onChange={onChange}
-              placeholder={templates ? '$state.temp 或 ${...}' : '值'}
-              disabled={disabled}
-              monospace
-              className="min-w-0 flex-1"
-              ariaLabel="字符串值"
-            />
+            {templates ? (
+              <TemplateInput
+                value={value as string}
+                onChange={onChange}
+                context={completion ?? FALLBACK_COMPLETION}
+                placeholder="$state.temp 或 ${...}"
+                disabled={disabled}
+                className="min-w-0 flex-1"
+                ariaLabel="字符串值"
+                focusRequest={focusRequest}
+              />
+            ) : (
+              <TextInput
+                value={value as string}
+                onChange={onChange}
+                placeholder="值"
+                disabled={disabled}
+                monospace
+                className="min-w-0 flex-1"
+                ariaLabel="字符串值"
+              />
+            )}
             {templates && isTemplateString(value) && (
               <span className="chip shrink-0 border-accent-500/20 text-accent-300">fx</span>
             )}
           </div>
         )}
         {type === 'number' && (
-          <NumberInput
-            value={value as number}
-            onChange={(next) => onChange(next ?? 0)}
-            disabled={disabled}
-            ariaLabel="数字值"
-          />
+          <div
+            className="min-w-0 flex-1"
+            onKeyDownCapture={(event) => {
+              if (!templates || disabled || event.nativeEvent.isComposing) return;
+              if (event.key !== '$' || event.ctrlKey || event.metaKey || event.altKey) {
+                return;
+              }
+              if (!(event.target instanceof HTMLInputElement)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              switchToExpression('$', 1);
+            }}
+            onPasteCapture={(event) => {
+              if (!templates || disabled) return;
+              const text = event.clipboardData.getData('text');
+              if (!text.includes('$')) return;
+              event.preventDefault();
+              event.stopPropagation();
+              switchToExpression(text, text.length);
+            }}
+          >
+            <NumberInput
+              value={value as number}
+              onChange={(next) => onChange(next ?? 0)}
+              disabled={disabled}
+              ariaLabel="数字值"
+            />
+          </div>
         )}
         {type === 'boolean' && (
           <SelectInput<'true' | 'false'>
@@ -354,6 +423,7 @@ function JsonTypeValueEditor({
               addLabel="添加字段"
               emptyText="暂无字段"
               templates={templates}
+              completion={completion}
               disabled={disabled}
             />
           </div>
@@ -365,11 +435,25 @@ function JsonTypeValueEditor({
               onChange={onChange}
               depth={depth + 1}
               templates={templates}
+              completion={completion}
               disabled={disabled}
             />
           </div>
         )}
       </div>
+      {templates &&
+        completion &&
+        (type === 'number' || type === 'boolean' || type === 'null') && (
+          <IconButton
+            label="转为模板表达式"
+            disabled={disabled}
+            onClick={() =>
+              switchToExpression(type === 'number' ? '$' : '${}', type === 'number' ? 1 : 2)
+            }
+          >
+            <span className="font-mono text-[10px]">fx</span>
+          </IconButton>
+        )}
     </div>
   );
 }

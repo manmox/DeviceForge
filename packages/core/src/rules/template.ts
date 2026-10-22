@@ -1,97 +1,133 @@
-import type { ConnectionInfo } from '../types';
+import {
+  evaluateBarePath,
+  evaluateExpression,
+  type TemplateContext,
+} from './expression';
 
-export interface TemplateContext {
-  req?: Record<string, unknown>;
-  state: Record<string, unknown>;
-  counters: Record<string, number>;
-  conn?: ConnectionInfo;
-  now: number;
-}
+export type { TemplateContext } from './expression';
+export { TEMPLATE_FUNCTIONS } from './expression';
+export type { TemplateFunctionInfo } from './expression';
 
 const PATH_PATTERN = /^\$([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/;
-const WHOLE_EXPRESSION_PATTERN = /^\$\{([^}]+)\}$/;
-const EXPRESSION_PATTERN = /\$\{([^}]+)\}/g;
+const MAX_INTERPOLATIONS = 128;
 
-function resolvePath(path: string, ctx: TemplateContext): unknown {
-  const parts = path.split('.');
-  const root = parts[0];
-  let current: unknown;
+export type TemplatePart =
+  | { kind: 'text'; text: string; start: number; end: number }
+  | { kind: 'expression'; source: string; start: number; end: number };
 
-  switch (root) {
-    case 'req':
-      current = ctx.req;
+/**
+ * Split a string into literal text and `${...}` expressions. Quotes are
+ * respected so `"a}b"` does not close an expression early. Unclosed and
+ * whitespace-only interpolations stay literal, matching the old regex behavior.
+ */
+export function scanTemplateParts(value: string): TemplatePart[] {
+  const parts: TemplatePart[] = [];
+  let cursor = 0;
+
+  while (cursor < value.length) {
+    const start = value.indexOf('${', cursor);
+    if (start === -1) {
+      if (cursor < value.length) {
+        parts.push({
+          kind: 'text',
+          text: value.slice(cursor),
+          start: cursor,
+          end: value.length,
+        });
+      }
       break;
-    case 'state':
-      current = ctx.state;
-      break;
-    case 'counter':
-      current = ctx.counters;
-      break;
-    case 'conn':
-      current = ctx.conn;
-      break;
-    case 'now':
-      return ctx.now;
-    default:
-      throw new Error(`未知模板变量 $${path}`);
-  }
-
-  for (const part of parts.slice(1)) {
-    if (current === null || current === undefined || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-function evaluateExpression(expression: string, ctx: TemplateContext): unknown {
-  const source = expression.trim();
-  const normalized = source.startsWith('$') ? source.slice(1) : source;
-
-  const randomMatch = /^random\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)$/.exec(source);
-  if (randomMatch) {
-    const first = Number(randomMatch[1]);
-    const second = Number(randomMatch[2]);
-    const min = Math.ceil(Math.min(first, second));
-    const max = Math.floor(Math.max(first, second));
-    if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
-      throw new Error(`random 参数无效：${source}`);
     }
-    return min + Math.floor(Math.random() * (max - min + 1));
-  }
 
-  const randomFloatMatch = /^randomFloat\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)$/.exec(source);
-  if (randomFloatMatch) {
-    const first = Number(randomFloatMatch[1]);
-    const second = Number(randomFloatMatch[2]);
-    const min = Math.min(first, second);
-    const max = Math.max(first, second);
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      throw new Error(`randomFloat 参数无效：${source}`);
+    if (start > cursor) {
+      parts.push({
+        kind: 'text',
+        text: value.slice(cursor, start),
+        start: cursor,
+        end: start,
+      });
     }
-    return Math.round((min + Math.random() * (max - min)) * 100) / 100;
+
+    let index = start + 2;
+    let quote: '"' | "'" | null = null;
+    let escaped = false;
+    let close = -1;
+
+    while (index < value.length) {
+      const char = value[index]!;
+      if (quote) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === quote) {
+          quote = null;
+        }
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '}') {
+        close = index;
+        break;
+      }
+      index += 1;
+    }
+
+    if (close === -1) {
+      parts.push({
+        kind: 'text',
+        text: value.slice(start),
+        start,
+        end: value.length,
+      });
+      break;
+    }
+
+    const source = value.slice(start + 2, close);
+    if (source.trim() === '') {
+      parts.push({
+        kind: 'text',
+        text: value.slice(start, close + 1),
+        start,
+        end: close + 1,
+      });
+    } else {
+      parts.push({
+        kind: 'expression',
+        source,
+        start,
+        end: close + 1,
+      });
+    }
+    cursor = close + 1;
   }
 
-  if (normalized === 'now') return ctx.now;
-  if (/^(req|state|counter|conn)(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(normalized)) {
-    return resolvePath(normalized, ctx);
-  }
-
-  throw new Error(`未知模板表达式：\${${expression}}`);
+  return parts;
 }
 
 function evaluateString(value: string, ctx: TemplateContext): unknown {
   const pathMatch = PATH_PATTERN.exec(value);
-  if (pathMatch) return resolvePath(pathMatch[1]!, ctx);
+  if (pathMatch) return evaluateBarePath(pathMatch[1]!, ctx);
 
-  const wholeMatch = WHOLE_EXPRESSION_PATTERN.exec(value);
-  if (wholeMatch) return evaluateExpression(wholeMatch[1]!, ctx);
+  const parts = scanTemplateParts(value);
+  const expressions = parts.filter((part) => part.kind === 'expression');
+  if (expressions.length === 0) return value;
+  if (expressions.length > MAX_INTERPOLATIONS) {
+    throw new Error(`模板插值过多（最多 ${MAX_INTERPOLATIONS} 个）`);
+  }
 
-  if (!value.includes('${')) return value;
+  if (parts.length === 1 && parts[0]!.kind === 'expression') {
+    return evaluateExpression(parts[0]!.source, ctx);
+  }
 
-  return value.replace(EXPRESSION_PATTERN, (_match, expression: string) => {
-    const resolved = evaluateExpression(expression, ctx);
-    return resolved === undefined ? '' : String(resolved);
-  });
+  let result = '';
+  for (const part of parts) {
+    if (part.kind === 'text') {
+      result += part.text;
+      continue;
+    }
+    const resolved = evaluateExpression(part.source, ctx);
+    result += resolved === undefined ? '' : String(resolved);
+  }
+  return result;
 }
 
 export function evaluate(value: unknown, ctx: TemplateContext): unknown {

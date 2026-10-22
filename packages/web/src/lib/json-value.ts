@@ -33,7 +33,11 @@ export function defaultValueForType(type: JsonValueType): unknown {
 }
 
 export function isTemplateString(value: unknown): boolean {
-  return typeof value === 'string' && (value.startsWith('$') || value.includes('${'));
+  return (
+    typeof value === 'string' &&
+    (value.includes('${') ||
+      /^\$(?:req|state|counter|conn|now)(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(value))
+  );
 }
 
 export function parseNumberInput(value: string): number | null {

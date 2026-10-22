@@ -7,9 +7,10 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { useId, type MouseEvent } from 'react';
+import { useId, useMemo, type MouseEvent } from 'react';
 import { codecMatchFieldSuggestions, defaultFieldsForCodec } from '../../lib/codec-fields';
 import { ruleSummaryParts } from '../../lib/config-summary';
+import { templateRootsFor } from '../../lib/template-suggestions';
 import {
   ruleSendMessages,
   ruleTrigger,
@@ -48,7 +49,7 @@ export function RuleCard({
   index,
   total,
   codec,
-  stateKeys,
+  state,
   onChange,
   onMove,
   onDuplicate,
@@ -61,7 +62,7 @@ export function RuleCard({
   index: number;
   total: number;
   codec: CodecConfig;
-  stateKeys: string[];
+  state: Record<string, unknown>;
   onChange: (next: Rule) => void;
   onMove: (direction: -1 | 1) => void;
   onDuplicate: () => void;
@@ -73,6 +74,18 @@ export function RuleCard({
   const issues = useIssues(`rules.${index}`);
   const bodyId = useId();
   const trigger = ruleTrigger(rule);
+  const stateKeySuggestions = useMemo(
+    () => Object.keys(state).map((name) => ({ name })),
+    [state],
+  );
+  const setCompletion = useMemo(
+    () => ({ roots: templateRootsFor('rule-set', trigger), codec, state }),
+    [trigger, codec, state],
+  );
+  const sendCompletion = useMemo(
+    () => ({ roots: templateRootsFor('rule-send', trigger), codec, state }),
+    [trigger, codec, state],
+  );
   const summaryParts = ruleSummaryParts(rule);
   if (summaryParts[0] === RULE_TRIGGER_LABELS[trigger]) summaryParts.shift();
   const summary = summaryParts.join(' · ');
@@ -289,7 +302,7 @@ export function RuleCard({
           <div className="rounded-lg border border-white/5 bg-white/[0.015] p-2.5">
             <SwitchRow
               label="更新状态变量"
-              hint="在发送前浅合并到设备状态；值支持模板。"
+              hint="在发送前浅合并到设备状态；值支持模板，输入 $ 或 ${ 可打开建议。"
               checked={setEnabled}
               onChange={(enabled) =>
                 enabled ? patch({ set: {} }) : onChange(unset('set'))
@@ -309,7 +322,8 @@ export function RuleCard({
                   addLabel="添加变量"
                   emptyText="没有状态更新"
                   templates
-                  suggestions={stateKeys.map((name) => ({ name }))}
+                  completion={setCompletion}
+                  suggestions={stateKeySuggestions}
                   disabled={disabled}
                 />
               </div>
@@ -373,6 +387,7 @@ export function RuleCard({
                       message={message}
                       onChange={(next) => updateMessage(messageIndex, next)}
                       codec={codec}
+                      templateContext={sendCompletion}
                       path={`rules.${index}.send${
                         messages.length > 1 ? `.${messageIndex}` : ''
                       }`}

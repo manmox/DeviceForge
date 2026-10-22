@@ -51,6 +51,7 @@ export function NewDeviceDialog({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handler);

@@ -3,6 +3,7 @@ import { Wand2 } from 'lucide-react';
 import { codecFieldSuggestions, defaultFieldsForCodec } from '../../lib/codec-fields';
 import { hexToBytes } from '../../lib/format';
 import { messageKind, withMessageKind } from '../../lib/rule-shape';
+import type { TemplateCompletionContext } from '../../lib/template-suggestions';
 import { useIssueText } from '../form/ConfigIssuesContext';
 import {
   FormField,
@@ -16,12 +17,14 @@ export function MessageEditor({
   message,
   onChange,
   codec,
+  templateContext,
   path,
   disabled = false,
 }: {
   message: OutgoingMessage;
   onChange: (next: OutgoingMessage) => void;
   codec: CodecConfig;
+  templateContext?: TemplateCompletionContext;
   path: string;
   disabled?: boolean;
 }) {
@@ -89,12 +92,13 @@ export function MessageEditor({
             addLabel="添加字段"
             emptyText="没有字段"
             templates
+            completion={templateContext}
             suggestions={suggestions}
             disabled={disabled}
           />
           <p className="text-[10.5px] leading-4 text-mist-500">
             {codec.type === 'fields'
-              ? '常量、长度和校验由 codec 自动补齐；值支持模板。'
+              ? '常量、长度和校验由 codec 自动补齐；值支持模板，输入 $ 或 ${ 可打开建议。'
               : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
           </p>
           {missingFields.length > 0 && (

@@ -174,7 +174,7 @@ export function RulesSection({
                 index={index}
                 total={rules.length}
                 codec={config.codec}
-                stateKeys={Object.keys(config.state)}
+                state={config.state}
                 onChange={(next) => updateRule(index, next)}
                 onMove={(direction) => moveRule(index, direction)}
                 onDuplicate={() => duplicateRule(index)}
