@@ -1,13 +1,14 @@
 import { Cpu, Plus, Wifi, WifiOff, X } from 'lucide-react';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 import type { DeviceSummary } from '../types';
 import { StatusBadge } from './StatusBadge';
 
 function endpointOf(device: DeviceSummary): string {
-  return (
-    device.status.endpoints[0] ??
-    `${device.config.transport.host}:${device.config.transport.port}`
-  );
+  return transportEndpoint(device.config.transport, device.status.endpoints);
 }
 
 export function Sidebar({
@@ -96,6 +97,9 @@ export function Sidebar({
               {devices.map((device) => {
                 const selected = device.config.id === selectedId;
                 const connectionCount = device.status.connections.length;
+                const presentation = transportPresentation(
+                  device.config.transport.type,
+                );
                 return (
                   <button
                     key={device.config.id}
@@ -125,7 +129,7 @@ export function Sidebar({
                         <span className="truncate">{endpointOf(device)}</span>
                         {connectionCount > 0 && (
                           <span className="shrink-0 rounded bg-accent-500/10 px-1 text-[10px] text-accent-300">
-                            {connectionCount} 连接
+                            {connectionCount} {presentation.connectionUnit}
                           </span>
                         )}
                       </span>

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Plug, Unplug } from 'lucide-react';
 import { formatBytes, formatDuration, formatTime } from '../lib/format';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 
 export function ConnectionsPanel() {
@@ -18,9 +22,13 @@ export function ConnectionsPanel() {
 
   if (!device) return null;
 
-  const endpoint =
-    device.status.endpoints[0] ??
-    `${device.config.transport.host}:${device.config.transport.port}`;
+  const presentation = transportPresentation(device.config.transport.type);
+  const endpoint = transportEndpoint(
+    device.config.transport,
+    device.status.endpoints,
+  );
+  const paused = device.status.transport.state === 'disconnected';
+  const failed = device.status.transport.state === 'error';
 
   async function handleDisconnect(connectionId: string) {
     setDisconnecting(connectionId);
@@ -33,7 +41,9 @@ export function ConnectionsPanel() {
       <div className="panel overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div>
-            <h3 className="text-sm font-medium text-mist-100">客户端连接</h3>
+            <h3 className="text-sm font-medium text-mist-100">
+              {presentation.connectionTitle}
+            </h3>
             <p className="mt-0.5 font-mono text-[11px] text-mist-500">{endpoint}</p>
           </div>
           <span className="chip">{connections.length}</span>
@@ -46,7 +56,11 @@ export function ConnectionsPanel() {
             </div>
             <h4 className="mt-3 text-sm font-medium text-mist-200">暂无连接</h4>
             <p className="mt-1.5 max-w-sm text-xs leading-5 text-mist-500">
-              让上位机连接 {endpoint} 后，连接会出现在这里。你可以查看收发字节数并手动断开。
+              {paused
+                ? presentation.pausedLabel
+                : failed
+                  ? `连接失败：${device.status.transport.error ?? '未知错误'}。重启设备后可重试。`
+                  : presentation.emptyConnectionText(endpoint)}
             </p>
           </div>
         ) : (
@@ -54,7 +68,9 @@ export function ConnectionsPanel() {
             <table className="w-full min-w-[640px] text-left text-xs">
               <thead className="border-b border-white/10 text-[10px] uppercase tracking-wider text-mist-500">
                 <tr>
-                  <th className="px-4 py-2 font-medium">客户端</th>
+                  <th className="px-4 py-2 font-medium">
+                    {presentation.peerLabel}
+                  </th>
                   <th className="px-4 py-2 font-medium">建立时间</th>
                   <th className="px-4 py-2 font-medium">时长</th>
                   <th className="px-4 py-2 font-medium">接收</th>
@@ -94,6 +110,7 @@ export function ConnectionsPanel() {
                         className="btn btn-danger btn-sm"
                         onClick={() => void handleDisconnect(connection.id)}
                         disabled={disconnecting === connection.id}
+                        title={presentation.disconnectHint}
                       >
                         <Unplug className="h-3.5 w-3.5" />
                         {disconnecting === connection.id ? '断开中…' : '断开'}

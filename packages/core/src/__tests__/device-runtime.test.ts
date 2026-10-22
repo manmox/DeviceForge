@@ -1,11 +1,11 @@
 import { once } from 'node:events';
-import { createConnection, type Socket } from 'node:net';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { createCodec } from '../codec';
 import { createFramer, type FrameDecoder } from '../framing';
 import { DeviceRuntime } from '../runtime/device-runtime';
 import { DeviceConfigSchema, type DeviceConfig } from '../schema/device';
-import type { TrafficEvent } from '../types';
+import type { TrafficEvent, TransportStatus } from '../types';
 
 const config: DeviceConfig = DeviceConfigSchema.parse({
   id: 'sensor-1',
@@ -193,6 +193,358 @@ describe('DeviceRuntime over TCP', () => {
     }
   });
 });
+
+interface FrameReader {
+  next(timeoutMs?: number): Promise<Buffer>;
+}
+
+function createFrameReader(socket: Socket, framer: FrameDecoder): FrameReader {
+  const queue: Buffer[] = [];
+  const waiters: ((frame: Buffer) => void)[] = [];
+
+  socket.on('data', (chunk: Buffer) => {
+    for (const frame of framer.push(chunk)) {
+      const waiter = waiters.shift();
+      if (waiter) waiter(frame);
+      else queue.push(frame);
+    }
+  });
+
+  return {
+    next(timeoutMs = 2_000): Promise<Buffer> {
+      const queued = queue.shift();
+      if (queued) return Promise.resolve(queued);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('等待上游报文超时')),
+          timeoutMs,
+        );
+        waiters.push((frame) => {
+          clearTimeout(timer);
+          resolve(frame);
+        });
+      });
+    },
+  };
+}
+
+interface Upstream {
+  server: Server;
+  port: number;
+  sockets: Set<Socket>;
+  accepted: { socket: Socket; frames: FrameReader }[];
+}
+
+async function startUpstream(
+  port = 0,
+  framing: DeviceConfig['framing'] = config.framing,
+): Promise<Upstream> {
+  const sockets = new Set<Socket>();
+  const accepted: { socket: Socket; frames: FrameReader }[] = [];
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    accepted.push({
+      socket,
+      frames: createFrameReader(socket, createFramer(framing)),
+    });
+    socket.on('close', () => sockets.delete(socket));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address !== 'object') {
+    throw new Error('上游测试服务器没有监听端口');
+  }
+  return { server, port: address.port, sockets, accepted };
+}
+
+async function closeUpstream(upstream: Upstream): Promise<void> {
+  for (const socket of upstream.sockets) socket.destroy();
+  await new Promise<void>((resolve) => upstream.server.close(() => resolve()));
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error('等待测试条件超时');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function reservePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address !== 'object') {
+    server.close();
+    throw new Error('无法分配测试端口');
+  }
+  const port = address.port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+function tcpClientConfig(port: number): DeviceConfig {
+  return DeviceConfigSchema.parse({
+    ...config,
+    transport: {
+      type: 'tcp-client',
+      host: '127.0.0.1',
+      port,
+      connectTimeoutMs: 300,
+      reconnect: { enabled: true, minDelayMs: 10, maxDelayMs: 40 },
+    },
+  });
+}
+
+describe('DeviceRuntime over TCP client', () => {
+  it('connects outbound, runs connect rules, and exchanges frames', async () => {
+    const upstream = await startUpstream();
+    const runtime = new DeviceRuntime(tcpClientConfig(upstream.port));
+
+    try {
+      await runtime.start();
+      await waitFor(() => upstream.accepted.length === 1);
+      const connection = upstream.accepted[0]!;
+
+      const greeting = await connection.frames.next();
+      expect(codec.decode(greeting).fields).toMatchObject({ cmd: 1, seq: 0 });
+      expect(runtime.getStatus().state).toBe('running');
+      expect(runtime.getStatus().transport.state).toBe('connected');
+      expect(runtime.getConnections()).toHaveLength(1);
+
+      const request = codec.encode(
+        { fields: { cmd: 3, seq: 7, temp: 0, humidity: 0 } },
+        { state: {}, counters: {}, now: Date.now() },
+      );
+      connection.socket.write(request);
+
+      const response = await connection.frames.next();
+      expect(codec.decode(response).fields).toMatchObject({
+        cmd: 131,
+        seq: 7,
+        temp: 25.5,
+        humidity: 60,
+      });
+
+      await runtime.send(
+        { fields: { cmd: 9, seq: 1, temp: 12.3, humidity: 45 } },
+        { target: 'last' },
+      );
+      const manual = await connection.frames.next();
+      expect(codec.decode(manual).fields).toMatchObject({ cmd: 9, temp: 12.3 });
+    } finally {
+      await runtime.stop();
+      await closeUpstream(upstream);
+    }
+  });
+
+  it('starts with the upstream down, reconnects, and reruns connect rules', async () => {
+    const port = await reservePort();
+    const runtime = new DeviceRuntime(tcpClientConfig(port));
+    const statuses: TransportStatus[] = [];
+    runtime.on('status', (status) => statuses.push(status.transport));
+
+    try {
+      await runtime.start();
+      expect(runtime.getStatus().state).toBe('running');
+      await waitFor(
+        () => runtime.getStatus().transport.state === 'reconnecting',
+      );
+      await expect(
+        runtime.send({ fields: { cmd: 9, seq: 1, temp: 0, humidity: 0 } }),
+      ).rejects.toThrow('当前没有可用连接');
+      expect(runtime.getStatus().state).toBe('running');
+
+      const upstream = await startUpstream(port);
+      try {
+        await waitFor(() => upstream.accepted.length === 1);
+        const first = upstream.accepted[0]!;
+        const firstGreeting = await first.frames.next();
+        expect(codec.decode(firstGreeting).fields).toMatchObject({ cmd: 1 });
+        expect(runtime.getStatus().transport.state).toBe('connected');
+
+        first.socket.destroy();
+        await waitFor(
+          () => runtime.getStatus().transport.state === 'reconnecting',
+        );
+        expect(runtime.getStatus().state).toBe('running');
+
+        await waitFor(() => upstream.accepted.length === 2);
+        const second = upstream.accepted[1]!;
+        const secondGreeting = await second.frames.next();
+        expect(codec.decode(secondGreeting).fields).toMatchObject({ cmd: 1 });
+        expect(runtime.getStatus().transport.state).toBe('connected');
+        expect(
+          statuses.filter((status) => status.state === 'connected').length,
+        ).toBeGreaterThanOrEqual(2);
+
+        await runtime.stop();
+        expect(runtime.getStatus().state).toBe('stopped');
+        expect(runtime.getStatus().transport.state).toBe('idle');
+      } finally {
+        await closeUpstream(upstream);
+      }
+    } finally {
+      await runtime.stop();
+    }
+  });
+});
+
+function sampleTextCodec(options: {
+  sequenceStart?: number;
+  ackTimeoutMs?: number;
+  maxRetries?: number;
+} = {}) {
+  return {
+    type: 'text',
+    separator: ':',
+    terminator: '\r\n',
+    timezone: 'UTC',
+    messages: [
+      {
+        name: 'report',
+        prefix: 'NO',
+        suffix: 'END',
+        slots: [
+          {
+            kind: 'field',
+            name: 'deviceCode',
+            type: 'string',
+            defaultFrom: 'tnsImei',
+          },
+          { kind: 'field', name: 'dataCount', type: 'int', width: 2 },
+          {
+            kind: 'repeat',
+            name: 'groups',
+            countField: 'dataCount',
+            itemSeparator: '*',
+            valueSeparator: '|',
+            keyField: 'id',
+            mapField: 'data',
+            mapKeyPrefix: 'c',
+            fields: [
+              { kind: 'field', name: 'id', type: 'string', width: 3 },
+              {
+                kind: 'field',
+                name: 'values',
+                type: 'stringList',
+                valueSeparator: '|',
+              },
+            ],
+          },
+          {
+            kind: 'field',
+            name: 'timestamp',
+            type: 'timestamp',
+            format: 'YYYY-MM-DD HH-mm-ss',
+            auto: 'timestamp',
+          },
+          {
+            kind: 'field',
+            name: 'sequence',
+            type: 'int',
+            optional: true,
+            auto: 'sequence',
+            sequenceStart: options.sequenceStart ?? 1,
+          },
+        ],
+      },
+      {
+        name: 'ack',
+        prefix: '<RPT',
+        suffix: 'DONE>',
+        slots: [
+          {
+            kind: 'field',
+            name: 'deviceCode',
+            type: 'string',
+            defaultFrom: 'tnsImei',
+          },
+          {
+            kind: 'field',
+            name: 'date',
+            type: 'timestamp',
+            format: 'YYYYMMDD',
+            auto: 'timestamp',
+          },
+          {
+            kind: 'field',
+            name: 'time',
+            type: 'timestamp',
+            format: 'HHmmss',
+            auto: 'timestamp',
+          },
+          { kind: 'field', name: 'sequence', type: 'int', optional: true },
+          { kind: 'field', name: 'status', type: 'string', default: 'OK' },
+        ],
+      },
+      {
+        name: 'command',
+        prefix: '<RPT',
+        suffix: 'DONE>',
+        match: [
+          { index: 2, equals: 'C' },
+          { index: 4, equals: 'A' },
+        ],
+        slots: [
+          {
+            kind: 'field',
+            name: 'deviceCode',
+            type: 'string',
+            defaultFrom: 'tnsImei',
+          },
+          { kind: 'literal', value: 'C' },
+          { kind: 'field', name: 'commandId', type: 'string', width: 3 },
+          { kind: 'literal', value: 'A' },
+          { kind: 'field', name: 'actionValue', type: 'string', width: 4 },
+        ],
+      },
+      {
+        name: 'echo',
+        prefix: 'NO',
+        suffix: 'END',
+        match: [
+          { index: 2, equals: 'C' },
+          { index: 4, equals: 'A' },
+        ],
+        slots: [
+          {
+            kind: 'field',
+            name: 'deviceCode',
+            type: 'string',
+            defaultFrom: 'tnsImei',
+          },
+          { kind: 'literal', value: 'C' },
+          { kind: 'field', name: 'commandId', type: 'string', width: 3 },
+          { kind: 'literal', value: 'A' },
+          { kind: 'field', name: 'actionValue', type: 'string', width: 4 },
+        ],
+      },
+    ],
+    session: {
+      ackMessage: 'ack',
+      trackMessages: ['report'],
+      sequenceField: 'sequence',
+      statusField: 'status',
+      successValues: ['OK'],
+      timeoutMs: options.ackTimeoutMs ?? 5_000,
+      maxRetries: options.maxRetries ?? 3,
+    },
+  };
+}
 
 describe('DeviceRuntime state', () => {
   it('replaces the whole state object instead of merging', () => {

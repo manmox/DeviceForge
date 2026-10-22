@@ -1,10 +1,23 @@
-import type { CodecConfig, FieldDef } from '@deviceforge/core';
+import type { CodecConfig, DeviceInfo, FieldDef } from '@deviceforge/core';
 import { TEMPLATE_FUNCTIONS } from '@deviceforge/core/template-functions';
 import { fieldSummary } from './config-summary';
 import type { RuleTrigger } from './rule-shape';
+import {
+  allTopLevelFields,
+  dictionaryEntry,
+  dictionaryOf,
+  findRepeatByMapField,
+  mapKeyForCode,
+} from './text-codec-model';
 
 export type TemplateScope = 'rule-set' | 'rule-send' | 'manual-send';
-export type TemplateRoot = 'req' | 'state' | 'counter' | 'conn' | 'now';
+export type TemplateRoot =
+  | 'req'
+  | 'state'
+  | 'counter'
+  | 'conn'
+  | 'device'
+  | 'now';
 
 export type TemplateSuggestionKind =
   | 'root'
@@ -12,12 +25,14 @@ export type TemplateSuggestionKind =
   | 'field'
   | 'state'
   | 'counter'
-  | 'connection';
+  | 'connection'
+  | 'device';
 
 export interface TemplateCompletionContext {
   roots: TemplateRoot[];
   codec?: CodecConfig;
   state?: Record<string, unknown>;
+  deviceInfo?: DeviceInfo;
   counters?: readonly ('tx' | 'rx')[];
   /** 默认值 4。 */
   maxStateDepth?: number;
@@ -72,7 +87,8 @@ const PATH_SEGMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const PATH_CHAR = /[A-Za-z0-9_.$]/;
 const DEFAULT_MAX_STATE_DEPTH = 4;
-const DEFAULT_MAX_ITEMS = 200;
+// 数据码字典约 300 项，上限需要覆盖完整字典；弹窗最终仍只显示前 50 条匹配。
+const DEFAULT_MAX_ITEMS = 400;
 const MAX_RENDERED = 50;
 
 const FUNCTION_DESCRIPTIONS: Record<string, string> = {
@@ -83,7 +99,14 @@ const FUNCTION_DESCRIPTIONS: Record<string, string> = {
   not: '逻辑非，对真值取反',
 };
 
-const ROOT_ORDER: TemplateRoot[] = ['req', 'state', 'counter', 'conn', 'now'];
+const ROOT_ORDER: TemplateRoot[] = [
+  'req',
+  'state',
+  'counter',
+  'conn',
+  'device',
+  'now',
+];
 
 export function templateRootsFor(
   scope: TemplateScope,
@@ -100,7 +123,7 @@ export function templateRootsFor(
   ) {
     roots.push('conn');
   }
-  roots.push('now');
+  roots.push('device', 'now');
   return roots;
 }
 
@@ -232,6 +255,54 @@ function reqCandidates(context: TemplateCompletionContext): Candidate[] {
     ];
   }
 
+  if (codec.type === 'text') {
+    const candidates: Candidate[] = [
+      {
+        id: 'req:_message',
+        kind: 'field',
+        name: '_message',
+        fullPath: 'req._message',
+        description: '命中的报文名，用于入站规则 match',
+        detail: '文本',
+        hasChildren: false,
+      },
+    ];
+
+    for (const field of allTopLevelFields(codec)) {
+      if (!isValidKey(field.name)) continue;
+      candidates.push({
+        id: `req:${field.name}`,
+        kind: 'field',
+        name: field.name,
+        fullPath: `req.${field.name}`,
+        description: field.description ?? '解码字段',
+        detail: field.type ?? '字段',
+        hasChildren: false,
+      });
+    }
+
+    for (const message of codec.messages) {
+      for (const slot of message.slots) {
+        if (slot.kind !== 'repeat' || !slot.mapField) continue;
+        if (!isValidKey(slot.mapField)) continue;
+        const dictionary = dictionaryOf(codec, slot);
+        candidates.push({
+          id: `req:${slot.mapField}`,
+          kind: 'field',
+          name: slot.mapField,
+          fullPath: `req.${slot.mapField}`,
+          description: `按 ${slot.keyField ?? '键'} 索引的重复组；模板不支持数组下标`,
+          detail: dictionary
+            ? Object.keys(dictionary).slice(0, 4).join(' / ')
+            : '对象',
+          hasChildren: true,
+        });
+      }
+    }
+
+    return candidates;
+  }
+
   const candidates: Candidate[] = [];
   for (const field of codec.fields) {
     if (!isValidKey(field.name)) continue;
@@ -276,6 +347,190 @@ function reqFieldCandidate(field: FieldDef, summary: string): Candidate {
   };
 }
 
+function textMapCandidates(
+  context: TemplateCompletionContext,
+  mapField: string,
+): Candidate[] {
+  const codec = context.codec;
+  if (codec?.type !== 'text') return [];
+  const found = findRepeatByMapField(codec, mapField);
+  if (!found) return [];
+  const dictionary = dictionaryOf(codec, found.repeat);
+  if (!dictionary) return [];
+
+  return Object.keys(dictionary)
+    .sort((left, right) => left.localeCompare(right))
+    .map((code) => {
+      const entry = dictionary[code];
+      const key = mapKeyForCode(found.repeat, code);
+      return {
+        id: `req:${mapField}:${key}`,
+        kind: 'field' as const,
+        name: key,
+        fullPath: `req.${mapField}.${key}`,
+        description: entry?.name ?? `数据码 ${code}`,
+        detail: entry?.unit ?? (entry?.valueFormat ? '波形' : entry?.multi ? '多值' : '数值'),
+        hasChildren: true,
+      };
+    });
+}
+
+function dictionaryCodeForMapKey(
+  repeat: { mapKeyPrefix?: string },
+  key: string,
+): string {
+  const prefix = repeat.mapKeyPrefix ?? '';
+  return prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key;
+}
+
+function textMapEntryCandidates(
+  context: TemplateCompletionContext,
+  mapField: string,
+  mapKey: string,
+): Candidate[] {
+  const codec = context.codec;
+  if (codec?.type !== 'text') return [];
+  const found = findRepeatByMapField(codec, mapField);
+  if (!found) return [];
+  const code = dictionaryCodeForMapKey(found.repeat, mapKey);
+  const entry = dictionaryEntry(codec, found.repeat, code);
+  const base = `req.${mapField}.${mapKey}`;
+  const waveform: Candidate[] = entry?.valueFormat
+    ? [
+        {
+          id: `req:${mapField}:${mapKey}:waveform`,
+          kind: 'field',
+          name: 'waveform',
+          fullPath: `${base}.waveform`,
+          description: '波形摘要（不含全部点数据）',
+          detail: `${entry.valueFormat.points} 点`,
+          hasChildren: true,
+        },
+      ]
+    : [];
+
+  return [
+    ...waveform,
+    {
+      id: `req:${mapField}:${mapKey}:value`,
+      kind: 'field',
+      name: 'value',
+      fullPath: `${base}.value`,
+      description: '首个数值',
+      detail: '文本',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:values`,
+      kind: 'field',
+      name: 'values',
+      fullPath: `${base}.values`,
+      description: '全部数值（数组，不能下标访问）',
+      detail: '数组',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:id`,
+      kind: 'field',
+      name: 'id',
+      fullPath: `${base}.id`,
+      description: '数据标识码',
+      detail: '文本',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:name`,
+      kind: 'field',
+      name: 'name',
+      fullPath: `${base}.name`,
+      description: '数据名称',
+      detail: '文本',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:unit`,
+      kind: 'field',
+      name: 'unit',
+      fullPath: `${base}.unit`,
+      description: '数据单位',
+      detail: '文本',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:multi`,
+      kind: 'field',
+      name: 'multi',
+      fullPath: `${base}.multi`,
+      description: '是否多值数据码',
+      detail: '布尔',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:raw`,
+      kind: 'field',
+      name: 'raw',
+      fullPath: `${base}.raw`,
+      description: '原始 group token',
+      detail: '文本',
+      hasChildren: false,
+    },
+  ];
+}
+
+function textWaveformCandidates(
+  mapField: string,
+  mapKey: string,
+): Candidate[] {
+  const base = `req.${mapField}.${mapKey}.waveform`;
+  return [
+    {
+      id: `req:${mapField}:${mapKey}:waveform:pointCount`,
+      kind: 'field',
+      name: 'pointCount',
+      fullPath: `${base}.pointCount`,
+      description: '波形点数',
+      detail: '数值',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:waveform:byteLength`,
+      kind: 'field',
+      name: 'byteLength',
+      fullPath: `${base}.byteLength`,
+      description: '波形字节数',
+      detail: '数值',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:waveform:encoding`,
+      kind: 'field',
+      name: 'encoding',
+      fullPath: `${base}.encoding`,
+      description: '波形数据格式',
+      detail: 'hex / base64',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:waveform:crcValid`,
+      kind: 'field',
+      name: 'crcValid',
+      fullPath: `${base}.crcValid`,
+      description: '波形 CRC 是否通过',
+      detail: '布尔',
+      hasChildren: false,
+    },
+    {
+      id: `req:${mapField}:${mapKey}:waveform:crc`,
+      kind: 'field',
+      name: 'crc',
+      fullPath: `${base}.crc`,
+      description: '收到的 CRC 字节（hex）',
+      detail: '文本',
+      hasChildren: false,
+    },
+  ];
+}
+
 function counterCandidates(context: TemplateCompletionContext): Candidate[] {
   const counters = context.counters ?? ['tx', 'rx'];
   return counters.map((name) => ({
@@ -306,7 +561,7 @@ function connCandidates(): Candidate[] {
       kind: 'connection',
       name: 'remoteAddress',
       fullPath: 'conn.remoteAddress',
-      description: '远端地址',
+      description: '对端地址',
       detail: '文本',
       hasChildren: false,
     },
@@ -315,7 +570,7 @@ function connCandidates(): Candidate[] {
       kind: 'connection',
       name: 'remotePort',
       fullPath: 'conn.remotePort',
-      description: '远端端口',
+      description: '对端端口',
       detail: '数值',
       hasChildren: false,
     },
@@ -349,6 +604,38 @@ function connCandidates(): Candidate[] {
   ];
 }
 
+const DEVICE_FIELD_DESCRIPTIONS: {
+  key: keyof DeviceInfo;
+  description: string;
+}[] = [
+  { key: 'manufacturer', description: '厂商' },
+  { key: 'model', description: '型号' },
+  { key: 'serialNumber', description: '序列号' },
+  { key: 'hardwareVersion', description: '硬件版本' },
+  { key: 'firmwareVersion', description: '固件版本' },
+  { key: 'tnsImei', description: 'TNS/IMEI 设备编码' },
+];
+
+function deviceCandidates(context: TemplateCompletionContext): Candidate[] {
+  const info = context.deviceInfo;
+  if (!info) return [];
+  return DEVICE_FIELD_DESCRIPTIONS.flatMap(({ key, description }) => {
+    const value = info[key];
+    if (value === undefined || value === '') return [];
+    return [
+      {
+        id: `device:${key}`,
+        kind: 'device' as const,
+        name: key,
+        fullPath: `device.${key}`,
+        description,
+        detail: clip(value),
+        hasChildren: false,
+      },
+    ];
+  });
+}
+
 function rootHasChildren(
   root: TemplateRoot,
   context: TemplateCompletionContext,
@@ -366,6 +653,8 @@ function rootHasChildren(
       return (context.counters ?? ['tx', 'rx']).length > 0;
     case 'conn':
       return true;
+    case 'device':
+      return deviceCandidates(context).length > 0;
     case 'now':
       return false;
   }
@@ -379,6 +668,7 @@ const ROOT_DESCRIPTIONS: Record<
   state: { description: '设备状态变量', detail: '所有连接共享' },
   counter: { description: '收发帧计数', detail: 'tx / rx' },
   conn: { description: '当前连接信息', detail: '发送目标连接' },
+  device: { description: '设备信息', detail: '型号、序列号、TNS/IMEI 等' },
   now: { description: '当前时间戳（毫秒）' },
 };
 
@@ -416,13 +706,32 @@ function memberCandidates(
   if (!context.roots.includes(root)) return [];
 
   if (root === 'req') {
-    return token.parentSegments.length === 1 ? reqCandidates(context) : [];
+    if (token.parentSegments.length === 1) return reqCandidates(context);
+    if (context.codec?.type === 'text') {
+      const mapField = token.parentSegments[1]!;
+      if (token.parentSegments.length === 2) {
+        return textMapCandidates(context, mapField);
+      }
+      if (token.parentSegments.length === 3) {
+        return textMapEntryCandidates(context, mapField, token.parentSegments[2]!);
+      }
+      if (
+        token.parentSegments.length === 4 &&
+        token.parentSegments[3] === 'waveform'
+      ) {
+        return textWaveformCandidates(mapField, token.parentSegments[2]!);
+      }
+    }
+    return [];
   }
   if (root === 'counter') {
     return token.parentSegments.length === 1 ? counterCandidates(context) : [];
   }
   if (root === 'conn') {
     return token.parentSegments.length === 1 ? connCandidates() : [];
+  }
+  if (root === 'device') {
+    return token.parentSegments.length === 1 ? deviceCandidates(context) : [];
   }
   if (root === 'now') return [];
 

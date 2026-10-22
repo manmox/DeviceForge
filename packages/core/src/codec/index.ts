@@ -1,6 +1,12 @@
 import { checksumSize, encodeChecksum, verifyChecksum } from '../checksum';
-import type { CodecConfig, FieldDef, OutgoingMessage } from '../schema/device';
+import type {
+  CodecConfig,
+  DeviceInfo,
+  FieldDef,
+  OutgoingMessage,
+} from '../schema/device';
 import type { ConnectionInfo, TrafficEvent } from '../types';
+import { TextCodec } from './text';
 
 export interface DecodeResult {
   fields: Record<string, unknown>;
@@ -14,12 +20,44 @@ export interface EncodeContext {
   counters: Record<string, number>;
   conn?: ConnectionInfo;
   req?: Record<string, unknown>;
+  /** 设备信息，模板可用 $device.* 引用。 */
+  device?: DeviceInfo;
   now: number;
+}
+
+/** prepareOutbound 的返回值；track 用于 ACK/重传会话。 */
+export interface PreparedOutbound {
+  message: OutgoingMessage;
+  track?: {
+    key: string;
+    /** 流水号在 decoded.fields 中的字段名，runtime 用它校验实际发送的帧。 */
+    field: string;
+    timeoutMs: number;
+    maxRetries: number;
+  };
+}
+
+export interface InboundObservation {
+  ackKey?: string;
+  ackOk?: boolean;
 }
 
 export interface Codec {
   decode(frame: Buffer): DecodeResult;
   encode(message: OutgoingMessage, ctx: EncodeContext): Buffer;
+  /** 在目标连接循环之前执行一次，用于固定协议流水号/时间戳。 */
+  prepareOutbound?(
+    message: OutgoingMessage,
+    ctx: EncodeContext,
+  ): PreparedOutbound;
+  /** 帧解码成功后调用，用于识别 ACK 等协议状态。 */
+  observeInbound?(
+    fields: Record<string, unknown>,
+  ): InboundObservation | undefined;
+}
+
+export interface CodecOptions {
+  deviceInfo?: DeviceInfo;
 }
 
 const FIXED_SIZES: Partial<Record<FieldDef['type'], number>> = {
@@ -474,12 +512,17 @@ class FieldsCodec implements Codec {
   }
 }
 
-export function createCodec(config: CodecConfig): Codec {
+export function createCodec(
+  config: CodecConfig,
+  options: CodecOptions = {},
+): Codec {
   switch (config.type) {
     case 'raw':
       return new RawCodec(config.display);
     case 'fields':
       return new FieldsCodec(config);
+    case 'text':
+      return new TextCodec(config, options);
   }
 }
 

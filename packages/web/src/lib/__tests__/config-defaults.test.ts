@@ -4,6 +4,7 @@ import {
   changeCodecType,
   changeFieldType,
   changeFramingType,
+  changeTransportType,
   createBlankConfig,
   defaultChecksum,
   defaultCodec,
@@ -11,6 +12,7 @@ import {
   defaultFraming,
   defaultOutgoingMessage,
   defaultRule,
+  defaultTransport,
   uniqueDeviceId,
 } from '../config-defaults';
 
@@ -29,6 +31,57 @@ describe('createBlankConfig', () => {
     expect(config.rules).toEqual([]);
     expect(config.autoStart).toBe(false);
     expect(config.deviceInfo).toBeUndefined();
+  });
+});
+
+describe('transport defaults', () => {
+  it('builds server and client transports', () => {
+    expect(defaultTransport('tcp-server')).toEqual({
+      type: 'tcp-server',
+      host: '127.0.0.1',
+      port: 19010,
+    });
+    expect(defaultTransport('tcp-client')).toEqual({
+      type: 'tcp-client',
+      host: '127.0.0.1',
+      port: 19001,
+      connectTimeoutMs: 5_000,
+      reconnect: {
+        enabled: true,
+        minDelayMs: 500,
+        maxDelayMs: 10_000,
+      },
+    });
+  });
+
+  it('changes transport type while preserving compatible host and port', () => {
+    const server = defaultTransport('tcp-server');
+    const client = changeTransportType(
+      { ...server, host: '192.168.1.20', port: 9000 },
+      'tcp-client',
+    );
+    expect(client).toMatchObject({
+      type: 'tcp-client',
+      host: '192.168.1.20',
+      port: 9000,
+    });
+
+    const toServer = changeTransportType(client, 'tcp-server');
+    expect(toServer).toEqual({
+      type: 'tcp-server',
+      host: '192.168.1.20',
+      port: 9000,
+    });
+
+    expect(changeTransportType(server, 'tcp-server')).toBe(server);
+  });
+
+  it('replaces the server auto-assigned port when switching to a client', () => {
+    const changed = changeTransportType(
+      { type: 'tcp-server', host: '127.0.0.1', port: 0 },
+      'tcp-client',
+    );
+    expect(changed).toMatchObject({ type: 'tcp-client', port: 19001 });
   });
 });
 
@@ -65,12 +118,20 @@ describe('framing defaults', () => {
 });
 
 describe('codec defaults', () => {
-  it('builds raw and fields codecs', () => {
+  it('builds raw, fields and text codecs', () => {
     expect(defaultCodec('raw')).toEqual({ type: 'raw', display: 'hex' });
     const fields = defaultCodec('fields');
     expect(fields).toMatchObject({
       type: 'fields',
       fields: [{ name: 'payload', type: 'bytes', length: 'remaining' }],
+    });
+    expect(defaultCodec('text')).toMatchObject({
+      type: 'text',
+      separator: ':',
+      terminator: '\r\n',
+      trim: true,
+      timezone: 'local',
+      messages: [{ name: 'message' }],
     });
   });
 
@@ -78,6 +139,7 @@ describe('codec defaults', () => {
     const current: CodecConfig = { type: 'raw', display: 'ascii' };
     expect(changeCodecType(current, 'raw')).toBe(current);
     expect(changeCodecType(current, 'fields')).toMatchObject({ type: 'fields' });
+    expect(changeCodecType(current, 'text')).toMatchObject({ type: 'text' });
   });
 });
 

@@ -1,6 +1,10 @@
 import type { CodecConfig, OutgoingMessage } from '@deviceforge/core';
 import { Wand2 } from 'lucide-react';
-import { codecFieldSuggestions, defaultFieldsForCodec } from '../../lib/codec-fields';
+import {
+  codecFieldSuggestions,
+  defaultFieldsForCodec,
+  missingFieldsForCodec,
+} from '../../lib/codec-fields';
 import { hexToBytes } from '../../lib/format';
 import { messageKind, withMessageKind } from '../../lib/rule-shape';
 import type { TemplateCompletionContext } from '../../lib/template-suggestions';
@@ -33,17 +37,7 @@ export function MessageEditor({
   const fields = message.fields ?? {};
   const suggestions = codecFieldSuggestions(codec);
 
-  const missingFields =
-    codec.type === 'fields'
-      ? codec.fields
-          .filter(
-            (field) =>
-              field.const === undefined &&
-              field.calc === undefined &&
-              !Object.prototype.hasOwnProperty.call(fields, field.name),
-          )
-          .map((field) => field.name)
-      : [];
+  const missingFields = missingFieldsForCodec(codec, fields);
 
   const hex = message.hex ?? '';
   const validHex = /^(?:[0-9a-fA-F]{2})*$/.test(hex);
@@ -99,7 +93,9 @@ export function MessageEditor({
           <p className="text-[10.5px] leading-4 text-mist-500">
             {codec.type === 'fields'
               ? '常量、长度和校验由 codec 自动补齐；值支持模板，输入 $ 或 ${ 可打开建议。'
-              : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
+              : codec.type === 'text'
+                ? 'kind 选择报文；repeat 用数组，item 字段名由 codec 配置决定；optional 字段可用 null 显式省略，timestamp / sequence 可自动生成。'
+                : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
           </p>
           {missingFields.length > 0 && (
             <InlineWarning>

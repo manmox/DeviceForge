@@ -1,6 +1,10 @@
 import type { DeviceConfig } from '@deviceforge/core';
 import { escapeDelimiterText } from './delimiter';
 import { deviceInfoHint } from './device-info';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from './transport-presentation';
 
 export type ConfigSectionId =
   | 'basic'
@@ -34,7 +38,7 @@ export const CONFIG_SECTIONS: ConfigSection[] = [
   {
     id: 'transport',
     label: '传输',
-    description: '设备监听的地址和端口。',
+    description: '设备监听或主动连接的网络端点。',
     paths: ['transport'],
   },
   {
@@ -46,7 +50,7 @@ export const CONFIG_SECTIONS: ConfigSection[] = [
   {
     id: 'codec',
     label: '编解码',
-    description: '字段顺序、常量、长度和校验。',
+    description: '字段顺序、文本报文、常量、长度和校验。',
     paths: ['codec'],
   },
   {
@@ -116,7 +120,7 @@ export function sectionHint(config: DeviceConfig, id: ConfigSectionId): string {
     case 'deviceInfo':
       return deviceInfoHint(config.deviceInfo);
     case 'transport':
-      return `${config.transport.host}:${config.transport.port}`;
+      return `${transportPresentation(config.transport.type).kindLabel} · ${transportEndpoint(config.transport)}`;
     case 'framing':
       switch (config.framing.type) {
         case 'raw':
@@ -135,7 +139,10 @@ export function sectionHint(config: DeviceConfig, id: ConfigSectionId): string {
       return '';
     case 'codec':
       if (config.codec.type === 'raw') return `raw · ${config.codec.display}`;
-      return `fields · ${config.codec.fields.length} 字段`;
+      if (config.codec.type === 'fields') {
+        return `fields · ${config.codec.fields.length} 字段`;
+      }
+      return `text · ${config.codec.messages.length} 报文 · 「${config.codec.separator}」`;
     case 'state':
       return `${Object.keys(config.state).length} 个变量`;
     case 'rules':

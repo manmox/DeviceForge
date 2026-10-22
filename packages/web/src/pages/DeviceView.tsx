@@ -16,8 +16,12 @@ import {
 import { ConfigPanel } from '../components/ConfigPanel';
 import { ConnectionsPanel } from '../components/ConnectionsPanel';
 import { deviceInfoHeaderValues } from '../lib/device-info';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from '../lib/transport-presentation';
 import { StatePanel } from '../components/StatePanel';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge, TransportBadge } from '../components/StatusBadge';
 import { TrafficPanel } from '../components/TrafficPanel';
 import { useAppStore } from '../store';
 import type { DeviceDetail } from '../types';
@@ -60,9 +64,8 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
   const status = device.status;
   const isRunning = status.state === 'running';
   const canStart = status.state === 'stopped' || status.state === 'error';
-  const endpoint =
-    status.endpoints[0] ??
-    `${device.config.transport.host}:${device.config.transport.port}`;
+  const presentation = transportPresentation(device.config.transport.type);
+  const endpoint = transportEndpoint(device.config.transport, status.endpoints);
   const counts: Partial<Record<TabId, number>> = {
     traffic: trafficCount,
     connections: status.connections.length,
@@ -81,7 +84,7 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
   function handleCopy() {
     void navigator.clipboard
       .writeText(endpoint)
-      .then(() => showToast('监听地址已复制', 'success'))
+      .then(() => showToast(`${presentation.endpointLabel}已复制`, 'success'))
       .catch(() => showToast('复制失败，请检查浏览器权限', 'error'));
   }
 
@@ -106,6 +109,9 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
                 {device.config.name}
               </h1>
               <StatusBadge state={status.state} />
+              {(status.state === 'running' || status.state === 'starting') && (
+                <TransportBadge status={status.transport} />
+              )}
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-mist-500">
               <span className="font-mono">{device.config.id}</span>
@@ -113,14 +119,16 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
               <button
                 className="chip font-mono transition-colors hover:border-white/20 hover:text-mist-200"
                 onClick={handleCopy}
-                title="复制监听地址"
+                title={presentation.copyEndpointTitle}
               >
                 <Radio className="h-3 w-3 text-accent-400" />
                 {endpoint}
                 <Copy className="h-3 w-3" />
               </button>
               {status.connections.length > 0 && (
-                <span className="chip">{status.connections.length} 个连接</span>
+                <span className="chip">
+                  {status.connections.length} {presentation.connectionUnit}
+                </span>
               )}
               {device.config.description && (
                 <span className="hidden max-w-md truncate sm:inline">
@@ -198,6 +206,29 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-rose-500/25 bg-rose-500/[0.07] px-3 py-2 text-xs leading-5 text-rose-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 break-words">{status.error}</span>
+          </div>
+        )}
+
+        {status.state === 'running' && status.transport.state === 'reconnecting' && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.07] px-3 py-2 text-xs leading-5 text-amber-200">
+            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+            <span className="min-w-0 break-words">
+              {presentation.isOutbound ? '上游连接已断开' : '连接已断开'}
+              ，正在自动重连
+              {status.transport.attempt
+                ? `（第 ${status.transport.attempt} 次）`
+                : ''}
+              。设备仍在运行。
+            </span>
+          </div>
+        )}
+
+        {status.state === 'running' && status.transport.state === 'error' && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-rose-500/25 bg-rose-500/[0.07] px-3 py-2 text-xs leading-5 text-rose-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 break-words">
+              传输错误：{status.transport.error ?? '连接失败'}。设备仍在运行。
+            </span>
           </div>
         )}
 

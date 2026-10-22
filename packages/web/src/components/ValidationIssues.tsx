@@ -1,6 +1,10 @@
 import type { DeviceConfig } from '@deviceforge/core';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from '../lib/transport-presentation';
 import type { ValidationIssue } from '../types';
 
 export function ValidationIssues({
@@ -34,6 +38,8 @@ export function ValidationSummary({
   config: DeviceConfig;
   extra?: ReactNode;
 }) {
+  const presentation = transportPresentation(config.transport.type);
+
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-accent-500/20 bg-accent-500/[0.05] px-3 py-2 text-[11px] text-accent-200">
       <span className="inline-flex items-center gap-1">
@@ -42,7 +48,7 @@ export function ValidationSummary({
       </span>
       <span className="font-mono">id: {config.id}</span>
       <span className="font-mono">
-        监听: {config.transport.host}:{config.transport.port}
+        {presentation.endpointShortLabel}: {transportEndpoint(config.transport)}
       </span>
       <span>{config.rules.length} 条规则</span>
       {extra}

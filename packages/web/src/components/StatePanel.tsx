@@ -2,6 +2,10 @@ import { Activity, Braces, Check, Clock, Loader2, RotateCcw, Save } from 'lucide
 import { useEffect, useRef, useState } from 'react';
 import { useJsonDraft } from '../hooks/useJsonDraft';
 import { formatBytes, formatUptime } from '../lib/format';
+import {
+  transportEndpoint,
+  transportPresentation,
+} from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 import type { DeviceDetail } from '../types';
 import { CodeEditor } from './CodeEditor';
@@ -58,9 +62,11 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
   }
 
   const counters = device.status.counters;
-  const endpoint =
-    device.status.endpoints[0] ??
-    `${device.config.transport.host}:${device.config.transport.port}`;
+  const presentation = transportPresentation(device.config.transport.type);
+  const endpoint = transportEndpoint(
+    device.config.transport,
+    device.status.endpoints,
+  );
 
   const stats = [
     {
@@ -71,7 +77,7 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
     },
     {
       icon: Activity,
-      label: '客户端连接',
+      label: presentation.connectionStatLabel,
       value: String(device.status.connections.length),
       accent: 'text-accent-400',
     },
@@ -196,7 +202,9 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
           </div>
 
           <div className="panel px-3 py-3">
-            <div className="text-[10.5px] text-mist-500">监听端点</div>
+            <div className="text-[10.5px] text-mist-500">
+              {presentation.endpointLabel}
+            </div>
             <div className="mt-1 break-all font-mono text-xs text-mist-200">{endpoint}</div>
             <div className="mt-3 flex items-center gap-1.5 text-[10.5px] text-mist-500">
               <Check className="h-3.5 w-3.5 text-accent-400" />

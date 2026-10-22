@@ -6,8 +6,19 @@ import { evaluateFields, type TemplateContext } from '../rules/template';
 import type { DeviceConfig, OutgoingMessage, Rule } from '../schema/device';
 import { createTransport } from '../transport';
 import type { TransportAdapter } from '../transport/types';
-import type { ConnectionInfo, Counters, DeviceStatus, TrafficEvent } from '../types';
+import type {
+  ConnectionInfo,
+  Counters,
+  DeviceStatus,
+  TransportStatus,
+  TrafficEvent,
+} from '../types';
 import { EventBus } from './event-bus';
+import {
+  ProtocolSession,
+  type PendingHandle,
+  type ProtocolSendContext,
+} from './protocol-session';
 import { TrafficBuffer } from './traffic-buffer';
 
 export interface DeviceEventMap {
@@ -51,6 +62,10 @@ function remoteLabel(connection: ConnectionInfo): string {
   return `${connection.remoteAddress ?? 'unknown'}:${connection.remotePort ?? '?'}`;
 }
 
+function idleTransportStatus(config: DeviceConfig): TransportStatus {
+  return { kind: config.transport.type, state: 'idle' };
+}
+
 export class DeviceRuntime {
   private _config: DeviceConfig;
   private readonly bus = new EventBus<DeviceEventMap>();
@@ -70,6 +85,7 @@ export class DeviceRuntime {
   private state: Record<string, unknown>;
   private templateCounters: Record<string, number> = { tx: 0, rx: 0 };
   private transport?: TransportAdapter;
+  private protocolSession: ProtocolSession;
   private status: DeviceStatus;
   private stopping = false;
   private statsTimer?: NodeJS.Timeout;
@@ -79,17 +95,19 @@ export class DeviceRuntime {
     options: DeviceRuntimeOptions = {},
   ) {
     this._config = config;
-    this.codec = createCodec(config.codec);
+    this.codec = createCodec(config.codec, { deviceInfo: config.deviceInfo });
     this.rules = config.rules;
     this.state = structuredClone(config.state);
     this.traffic = new TrafficBuffer(options.trafficCapacity ?? 5000);
     this.status = {
       deviceId: config.id,
       state: 'stopped',
+      transport: idleTransportStatus(config),
       endpoints: [],
       connections: [],
       counters: { ...this.counters },
     };
+    this.protocolSession = this.createProtocolSession();
   }
 
   get config(): DeviceConfig {
@@ -118,19 +136,42 @@ export class DeviceRuntime {
       this.transport = undefined;
     }
 
-    this.setStatus({ state: 'starting', error: undefined });
+    // stop() 会终止旧 session；每次 start/restart 都从空的待确认队列开始。
+    this.protocolSession.stop();
+    this.protocolSession = this.createProtocolSession();
+
+    this.setStatus({
+      state: 'starting',
+      error: undefined,
+      transport: idleTransportStatus(this._config),
+    });
     try {
       const transport = createTransport(this._config.transport);
       this.transport = transport;
+      const isCurrent = () => this.transport === transport;
       await transport.start({
-        onData: (connectionId, data) => this.handleData(connectionId, data),
-        onConnect: (connection) => this.handleConnect(connection),
-        onDisconnect: (connectionId) => this.handleDisconnect(connectionId),
-        onError: (error, connectionId) => this.reportError(error.message, connectionId),
+        onData: (connectionId, data) => {
+          if (isCurrent()) this.handleData(connectionId, data);
+        },
+        onConnect: (connection) => {
+          if (isCurrent()) this.handleConnect(connection);
+        },
+        onDisconnect: (connectionId) => {
+          if (isCurrent()) this.handleDisconnect(connectionId);
+        },
+        onError: (error, connectionId) => {
+          if (isCurrent()) this.reportError(error.message, connectionId);
+        },
+        onStatus: (status) => {
+          if (!isCurrent()) return;
+          this.protocolSession.onTransportStatus(status);
+          this.setStatus({ transport: status });
+        },
       });
 
       this.setStatus({
         state: 'running',
+        transport: transport.status(),
         endpoints: transport.endpoints(),
         connections: transport.connections(),
         startedAt: Date.now(),
@@ -143,12 +184,19 @@ export class DeviceRuntime {
       this.clearTimers();
       this.clearStatsTimer();
       this.framers.clear();
+      this.protocolSession.stop();
       const transport = this.transport;
       this.transport = undefined;
       if (transport) await transport.stop().catch(() => undefined);
+      const message = errorMessage(error);
       this.setStatus({
         state: 'error',
-        error: errorMessage(error),
+        error: message,
+        transport: {
+          kind: this._config.transport.type,
+          state: 'error',
+          error: message,
+        },
         endpoints: [],
         connections: [],
         startedAt: undefined,
@@ -162,6 +210,7 @@ export class DeviceRuntime {
     this.stopping = true;
     this.clearTimers();
     this.clearStatsTimer();
+    this.protocolSession.stop();
     this.framers.clear();
     this.frameQueues.clear();
 
@@ -174,6 +223,7 @@ export class DeviceRuntime {
       this.stopping = false;
       this.setStatus({
         state: 'stopped',
+        transport: idleTransportStatus(this._config),
         endpoints: [],
         connections: [],
         startedAt: undefined,
@@ -191,7 +241,9 @@ export class DeviceRuntime {
     if (this.isActive) throw new Error('请先停止设备再修改配置');
 
     this._config = config;
-    this.codec = createCodec(config.codec);
+    this.codec = createCodec(config.codec, { deviceInfo: config.deviceInfo });
+    this.protocolSession.stop();
+    this.protocolSession = this.createProtocolSession();
     this.rules = [...config.rules];
     this.state = structuredClone(config.state);
     this.framers.clear();
@@ -202,6 +254,7 @@ export class DeviceRuntime {
     this.setStatus({
       deviceId: config.id,
       state: 'stopped',
+      transport: idleTransportStatus(config),
       endpoints: [],
       connections: [],
       startedAt: undefined,
@@ -229,35 +282,63 @@ export class DeviceRuntime {
 
     if (targetIds.length === 0) {
       if (options.silentIfNoConnection) return;
-      throw new Error('当前没有已连接的客户端');
+      throw new Error('当前没有可用连接');
     }
+
+    // 协议流水号和设备时间必须在进入目标连接循环前固定一次，否则多连接
+    // 会各自生成不同的 sequence/timestamp。
+    const prepared =
+      this.codec.prepareOutbound?.(
+        message,
+        this.templateContext(undefined, options.req),
+      ) ?? { message };
 
     for (const connectionId of targetIds) {
       const connection = byId.get(connectionId);
       if (!connection) continue;
 
       const templateContext = this.templateContext(connectionId, options.req);
-      const resolvedFields = message.fields
-        ? evaluateFields(message.fields, templateContext)
+      const resolvedFields = prepared.message.fields
+        ? evaluateFields(prepared.message.fields, templateContext)
         : undefined;
       const outbound: OutgoingMessage =
-        message.hex !== undefined ? { hex: message.hex } : { fields: resolvedFields ?? {} };
+        prepared.message.hex !== undefined
+          ? { hex: prepared.message.hex }
+          : { fields: resolvedFields ?? {} };
 
       const data = this.codec.encode(outbound, {
         state: this.state,
         counters: this.templateCounters,
         conn: connection,
         req: options.req,
+        device: this._config.deviceInfo,
         now: Date.now(),
       });
 
-      await transport.send(connectionId, data);
+      // 先用最终字节确认报文确实带有预期流水号，再登记 pending；模板把
+      // 可选流水号求值为空时不会产生永远等不到 ACK 的条目。
+      const decoded = tryDecode(this.codec, data);
+      const trackable =
+        prepared.track !== undefined &&
+        decoded?.valid === true &&
+        String(decoded.fields[prepared.track.field] ?? '') ===
+          prepared.track.key;
+      const pending: PendingHandle | undefined = trackable
+        ? this.protocolSession.register(connectionId, prepared.track!, data)
+        : undefined;
+
+      try {
+        await transport.send(connectionId, data);
+        if (pending) this.protocolSession.arm(pending);
+      } catch (error) {
+        if (pending) this.protocolSession.cancel(pending);
+        throw error;
+      }
 
       this.counters.txBytes += data.length;
       this.counters.txFrames += 1;
       this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
 
-      const decoded = tryDecode(this.codec, data);
       this.pushTraffic({
         id: randomUUID(),
         deviceId: this.id,
@@ -311,6 +392,7 @@ export class DeviceRuntime {
   getStatus(): DeviceStatus {
     return {
       ...this.status,
+      transport: this.transport?.status() ?? this.status.transport,
       endpoints: this.transport?.endpoints() ?? [],
       connections: this.transport?.connections() ?? [],
       counters: { ...this.counters },
@@ -405,23 +487,97 @@ export class DeviceRuntime {
       return;
     }
 
+    // 先处理 ACK，再执行规则，避免同一帧触发规则时 pending 尚未清除。
+    const observation = this.codec.observeInbound?.(decoded.fields);
+    if (observation?.ackKey !== undefined) {
+      this.protocolSession.acknowledge(
+        connectionId,
+        observation.ackKey,
+        observation.ackOk !== false,
+      );
+    }
+
     await this.runTrigger('frame', connectionId, decoded.fields);
   }
 
   private handleConnect(connection: ConnectionInfo): void {
     this.framers.set(connection.id, createFramer(this._config.framing));
-    this.pushTraffic(this.systemEvent(`客户端已连接 ${remoteLabel(connection)}`, connection.id));
+    this.pushTraffic(this.systemEvent(`连接已建立 ${remoteLabel(connection)}`, connection.id));
     this.emitConnections();
-    void this.runTrigger('connect', connection.id).catch((error) => {
-      this.reportError(`连接规则执行失败：${errorMessage(error)}`, connection.id);
-    });
+    void this.runTrigger('connect', connection.id)
+      .catch((error) => {
+        this.reportError(
+          `连接规则执行失败：${errorMessage(error)}`,
+          connection.id,
+        );
+      })
+      .finally(() => {
+        // 断线恢复必须等注册/握手规则执行完，否则可能先重发上报、后发注册。
+        if (this.stopping) return;
+        const stillConnected = this.transport
+          ?.connections()
+          .some((item) => item.id === connection.id);
+        if (stillConnected) {
+          this.protocolSession.onConnectionReady(connection.id);
+        }
+      });
   }
 
   private handleDisconnect(connectionId: string): void {
     this.framers.delete(connectionId);
     if (this.stopping) return;
-    this.pushTraffic(this.systemEvent('客户端已断开', connectionId));
+    this.protocolSession.onConnectionClosed(connectionId);
+    this.pushTraffic(this.systemEvent('连接已断开', connectionId));
     this.emitConnections();
+  }
+
+  private createProtocolSession(): ProtocolSession {
+    return new ProtocolSession({
+      mode: this._config.transport.type,
+      send: (connectionId, data, ctx) =>
+        this.resendProtocolFrame(connectionId, data, ctx),
+      notify: (level, message, connectionId) => {
+        if (level === 'error') {
+          this.reportError(message, connectionId);
+        } else {
+          this.pushTraffic(this.systemEvent(message, connectionId));
+        }
+      },
+    });
+  }
+
+  /** ACK 会话的重发路径：只重写原始字节，不重新执行模板和编码。 */
+  private async resendProtocolFrame(
+    connectionId: string,
+    data: Buffer,
+    ctx: ProtocolSendContext,
+  ): Promise<void> {
+    const transport = this.transport;
+    if (!transport) throw new Error('设备未启动');
+    if (!transport.connections().some((item) => item.id === connectionId)) {
+      throw new Error('连接已断开');
+    }
+
+    await transport.send(connectionId, data);
+
+    this.counters.txBytes += data.length;
+    this.counters.txFrames += 1;
+    this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
+
+    const decoded = tryDecode(this.codec, data);
+    const label = ctx.reason === 'reconnect' ? '重连恢复' : '重发';
+    this.pushTraffic({
+      id: randomUUID(),
+      deviceId: this.id,
+      connectionId,
+      ts: Date.now(),
+      direction: 'out',
+      data: data.toString('hex'),
+      size: data.length,
+      decoded: decoded?.fields,
+      note: `${label} seq=${ctx.sequence}（${ctx.attempt}/${ctx.maxRetries}）`,
+      error: decoded && !decoded.valid ? decoded.error : undefined,
+    });
   }
 
   private async runTrigger(
@@ -553,6 +709,7 @@ export class DeviceRuntime {
       state: this.state,
       counters: this.templateCounters,
       conn: connection,
+      device: this._config.deviceInfo,
       now: Date.now(),
     };
   }

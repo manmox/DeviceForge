@@ -1,4 +1,5 @@
 import type { CodecConfig } from '@deviceforge/core';
+import { TextCodecSchema } from '@deviceforge/core/schema';
 import { describe, expect, it } from 'vitest';
 import {
   applyTemplateSuggestion,
@@ -20,15 +21,70 @@ const fieldsCodec: CodecConfig = {
 };
 
 const rawCodec: CodecConfig = { type: 'raw', display: 'hex' };
+const textCodec: CodecConfig = TextCodecSchema.parse({
+  type: 'text',
+  messages: [
+    {
+      name: 'report',
+      slots: [
+        { kind: 'field', name: 'deviceCode', type: 'string' },
+        { kind: 'field', name: 'dataCount', type: 'int' },
+        {
+          kind: 'repeat',
+          name: 'groups',
+          countField: 'dataCount',
+          itemSeparator: '*',
+          keyField: 'id',
+          mapField: 'data',
+          mapKeyPrefix: 'c',
+          dictionary: 'codes',
+          fields: [
+            { kind: 'field', name: 'id', type: 'string' },
+            { kind: 'field', name: 'values', type: 'stringList' },
+          ],
+        },
+        {
+          kind: 'field',
+          name: 'timestamp',
+          type: 'timestamp',
+          format: 'YYYY-MM-DD HH-mm-ss',
+          auto: 'timestamp',
+        },
+        { kind: 'field', name: 'sequence', type: 'int', optional: true, auto: 'sequence' },
+      ],
+    },
+  ],
+  dictionaries: {
+    codes: {
+      '000': { name: '示例数值', unit: 'V' },
+      '089': { name: '示例状态', unit: 'mm', multi: true },
+      '220': {
+        name: '示例数组',
+        unit: 'Hz',
+        valueFormat: {
+          type: 'int16Array',
+          points: 1024,
+          endian: 'be',
+          encoding: 'hex',
+          crc: { algo: 'crc16-modbus', endian: 'le' },
+        },
+      },
+    },
+  },
+});
 
 const context: TemplateCompletionContext = {
-  roots: ['req', 'state', 'counter', 'conn', 'now'],
+  roots: ['req', 'state', 'counter', 'conn', 'device', 'now'],
   codec: fieldsCodec,
   state: {
     temp: 25.5,
     nested: { online: true },
     list: [1, 2],
     'bad-key': 1,
+  },
+  deviceInfo: {
+    model: 'TH-100',
+    tnsImei: '000000000000000',
   },
 };
 
@@ -45,11 +101,17 @@ function labels(value: string, ctx = context, caret = value.length) {
 
 describe('templateRootsFor', () => {
   it('respects trigger availability for set/send/manual-send', () => {
-    expect(templateRootsFor('rule-set', 'start')).toEqual(['state', 'counter', 'now']);
+    expect(templateRootsFor('rule-set', 'start')).toEqual([
+      'state',
+      'counter',
+      'device',
+      'now',
+    ]);
     expect(templateRootsFor('rule-set', 'connect')).toEqual([
       'state',
       'counter',
       'conn',
+      'device',
       'now',
     ]);
     expect(templateRootsFor('rule-set', 'frame')).toEqual([
@@ -57,11 +119,13 @@ describe('templateRootsFor', () => {
       'state',
       'counter',
       'conn',
+      'device',
       'now',
     ]);
     expect(templateRootsFor('rule-set', 'interval')).toEqual([
       'state',
       'counter',
+      'device',
       'now',
     ]);
     for (const trigger of ['start', 'connect', 'frame', 'interval'] as const) {
@@ -73,6 +137,7 @@ describe('templateRootsFor', () => {
       'state',
       'counter',
       'conn',
+      'device',
       'now',
     ]);
   });
@@ -166,6 +231,7 @@ describe('template suggestion catalog', () => {
         '$state',
         '$counter',
         '$conn',
+        '$device',
         '$now',
         'random(min, max)',
         'and(a, b, ...)',
@@ -188,6 +254,73 @@ describe('template suggestion catalog', () => {
       '$req.ascii',
       '$req.length',
     ]);
+  });
+
+  it('lists structured text request fields and the matched message name', () => {
+    const textContext: TemplateCompletionContext = {
+      ...context,
+      codec: textCodec,
+    };
+    const textLabels = labels('$req.', textContext);
+    expect(textLabels).toEqual(
+      expect.arrayContaining([
+        '$req._message',
+        '$req.deviceCode',
+        '$req.dataCount',
+        '$req.timestamp',
+        '$req.sequence',
+        '$req.groups',
+        '$req.data',
+      ]),
+    );
+    expect(textLabels).not.toContain('$req._checksum');
+  });
+
+  it('expands text dictionary map fields without array indexing', () => {
+    const textContext: TemplateCompletionContext = {
+      ...context,
+      codec: textCodec,
+    };
+    expect(labels('$req.data.', textContext)).toEqual(
+      expect.arrayContaining([
+        '$req.data.item101',
+        '$req.data.item105',
+        '$req.data.item202',
+      ]),
+    );
+    expect(labels('$req.data.item105.', textContext)).toEqual(
+      expect.arrayContaining([
+        '$req.data.item105.value',
+        '$req.data.item105.values',
+        '$req.data.item105.name',
+        '$req.data.item105.unit',
+        '$req.data.item105.multi',
+        '$req.data.item105.raw',
+      ]),
+    );
+    expect(labels('$req.data.item105.', textContext)).not.toContain(
+      '$req.data.item105.waveform',
+    );
+    expect(labels('$req.data.item202.', textContext)).toContain(
+      '$req.data.item202.waveform',
+    );
+    expect(labels('$req.data.item202.waveform.', textContext)).toEqual(
+      expect.arrayContaining([
+        '$req.data.item202.waveform.pointCount',
+        '$req.data.item202.waveform.crcValid',
+        '$req.data.item202.waveform.encoding',
+      ]),
+    );
+    // fields codec 也可能有名为 data 的字段，不应对其展开协议数据码。
+    expect(labels('$req.data.', context)).toEqual([]);
+  });
+
+  it('lists configured device fields under $device', () => {
+    expect(labels('$device.')).toEqual([
+      '$device.model',
+      '$device.tnsImei',
+    ]);
+    expect(labels('$device.', { ...context, deviceInfo: {} })).toEqual([]);
   });
 
   it('expands state objects and arrays', () => {

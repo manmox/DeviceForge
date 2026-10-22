@@ -11,6 +11,7 @@ import { useDeviceConfigDraft } from '../hooks/useDeviceConfigDraft';
 import type { ConfigSectionId } from '../lib/config-sections';
 import { createBlankConfig, uniqueDeviceId } from '../lib/config-defaults';
 import { stringifyDeviceConfig } from '../lib/config-serialize';
+import { transportPresentation } from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 import type { Preset } from '../types';
 import { CodeEditor } from './CodeEditor';
@@ -144,7 +145,7 @@ export function NewDeviceDialog({
             <p className="mt-0.5 text-xs text-mist-500">
               {step === 'presets'
                 ? '从预设开始，或使用空白配置自己定义协议。'
-                : '用可视化表单或 YAML 编辑配置；设备默认只监听本机地址。'}
+                : '用可视化表单或 YAML 编辑配置；传输可配置为监听或主动连接，默认只绑定本机。'}
             </p>
           </div>
           <button
@@ -168,7 +169,7 @@ export function NewDeviceDialog({
                 </div>
                 <h3 className="mt-3 text-sm font-medium text-mist-100">空白配置</h3>
                 <p className="mt-1.5 text-xs leading-5 text-mist-500">
-                  一个裸 TCP 设备，从零开始定义 framing、codec 和规则。
+                  一个裸 TCP 设备，默认监听本机；进入编辑器后可切换为主动连接上游。
                 </p>
               </button>
 
@@ -180,7 +181,9 @@ export function NewDeviceDialog({
                 >
                   <div className="flex w-full items-center justify-between gap-2">
                     <span className="chip font-mono text-[10px]">
-                      TCP :{preset.config.transport.port}
+                      {transportPresentation(preset.config.transport.type).kindLabel}
+                      {' :'}
+                      {preset.config.transport.port}
                     </span>
                     <FileCode2 className="h-4 w-4 text-mist-500 transition-colors group-hover:text-accent-400" />
                   </div>

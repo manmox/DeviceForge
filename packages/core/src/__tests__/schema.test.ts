@@ -80,6 +80,252 @@ describe('DeviceConfigSchema deviceInfo', () => {
   });
 });
 
+describe('DeviceConfigSchema transports', () => {
+  it('applies tcp-client defaults and keeps tcp-server unchanged', () => {
+    const server = DeviceConfigSchema.parse(baseConfig());
+    expect(server.transport).toEqual({
+      type: 'tcp-server',
+      host: '127.0.0.1',
+      port: 19001,
+    });
+
+    const parsed = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      transport: { type: 'tcp-client', port: 9000 },
+    });
+    expect(parsed.transport).toEqual({
+      type: 'tcp-client',
+      host: '127.0.0.1',
+      port: 9000,
+      connectTimeoutMs: 5_000,
+      reconnect: {
+        enabled: true,
+        minDelayMs: 500,
+        maxDelayMs: 10_000,
+      },
+    });
+  });
+
+  it('rejects missing or zero tcp-client ports', () => {
+    for (const port of [undefined, 0]) {
+      const result = DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        transport: { type: 'tcp-client', port },
+      });
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      expect(result.error.issues[0]?.path).toEqual(['transport', 'port']);
+    }
+  });
+
+  it('rejects invalid tcp-client timeout and reconnect settings', () => {
+    const cases = [
+      {
+        transport: {
+          type: 'tcp-client',
+          port: 9000,
+          connectTimeoutMs: 99,
+        },
+        path: ['transport', 'connectTimeoutMs'],
+      },
+      {
+        transport: {
+          type: 'tcp-client',
+          port: 9000,
+          reconnect: { minDelayMs: 500, maxDelayMs: 100 },
+        },
+        path: ['transport', 'reconnect', 'maxDelayMs'],
+      },
+      {
+        transport: {
+          type: 'tcp-client',
+          port: 9000,
+          reconnect: { minDelayMs: 9 },
+        },
+        path: ['transport', 'reconnect', 'minDelayMs'],
+      },
+    ];
+
+    for (const item of cases) {
+      const result = DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        transport: item.transport,
+      });
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      expect(result.error.issues[0]?.path).toEqual(item.path);
+    }
+  });
+});
+
+describe('DeviceConfigSchema text codec', () => {
+  function textCodec(overrides: Record<string, unknown> = {}) {
+    return {
+      type: 'text',
+      messages: [
+        {
+          name: 'report',
+          slots: [{ kind: 'field', name: 'value', type: 'string' }],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('applies text codec defaults', () => {
+    const parsed = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      codec: textCodec(),
+    });
+
+    expect(parsed.codec).toMatchObject({
+      type: 'text',
+      separator: ':',
+      terminator: '\r\n',
+      trim: true,
+      timezone: 'local',
+    });
+    expect(parsed.codec.type).toBe('text');
+  });
+
+  it('rejects the removed example-terminal codec without migration', () => {
+    const result = DeviceConfigSchema.safeParse({
+      ...baseConfig(),
+      codec: { type: 'example-terminal' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts named timezones and rejects invalid ones', () => {
+    const valid = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      codec: textCodec({ timezone: 'Asia/Shanghai' }),
+    });
+    expect(valid.codec).toMatchObject({ timezone: 'Asia/Shanghai' });
+
+    const invalid = DeviceConfigSchema.safeParse({
+      ...baseConfig(),
+      codec: textCodec({ timezone: 'Mars/Olympus' }),
+    });
+    expect(invalid.success).toBe(false);
+    if (invalid.success) return;
+    expect(
+      invalid.error.issues.some(
+        (issue) => issue.path.join('.') === 'codec.timezone',
+      ),
+    ).toBe(true);
+  });
+
+  it('validates optional, repeat, dictionary and session references', () => {
+    const cases = [
+      {
+        codec: textCodec({
+          messages: [
+            {
+              name: 'bad',
+              slots: [
+                { kind: 'field', name: 'a', type: 'int', optional: true },
+                { kind: 'field', name: 'b', type: 'int', optional: true },
+              ],
+            },
+          ],
+        }),
+        path: 'messages.0.slots.1.optional',
+      },
+      {
+        codec: textCodec({
+          messages: [
+            {
+              name: 'bad',
+              slots: [
+                { kind: 'field', name: 'count', type: 'int' },
+                {
+                  kind: 'repeat',
+                  name: 'items',
+                  countField: 'missing',
+                  itemSeparator: '*',
+                  valueField: 'values',
+                  fields: [
+                    { kind: 'field', name: 'id', type: 'string' },
+                    { kind: 'field', name: 'values', type: 'stringList' },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+        path: 'messages.0.slots.1.countField',
+      },
+      {
+        codec: textCodec({
+          messages: [
+            {
+              name: 'bad',
+              slots: [
+                {
+                  kind: 'repeat',
+                  name: 'items',
+                  countField: 'count',
+                  itemSeparator: '*',
+                  dictionary: 'missing',
+                  valueField: 'values',
+                  fields: [
+                    { kind: 'field', name: 'values', type: 'stringList' },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+        path: 'messages.0.slots.0.dictionary',
+      },
+      {
+        codec: textCodec({
+          messages: [
+            {
+              name: 'bad',
+              slots: [
+                {
+                  kind: 'field',
+                  name: 'timestamp',
+                  type: 'timestamp',
+                  format: 'HH:mm:ss',
+                  auto: 'timestamp',
+                },
+              ],
+            },
+          ],
+        }),
+        path: 'messages.0.slots.0.format',
+      },
+      {
+        codec: textCodec({
+          session: {
+            ackMessage: 'missing',
+            sequenceField: 'sequence',
+            statusField: 'status',
+          },
+        }),
+        path: 'session.ackMessage',
+      },
+    ];
+
+    for (const item of cases) {
+      const result = DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        codec: item.codec,
+      });
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      expect(
+        result.error.issues.some((issue) =>
+          issue.path.join('.').includes(item.path),
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
 describe('DeviceConfigSchema delimiter framing', () => {
   it('defaults legacy delimiter configs to hex', () => {
     const parsed = DeviceConfigSchema.parse({

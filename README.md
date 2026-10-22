@@ -2,13 +2,13 @@
 
 本地运行的物联网设备仿真工作台。用配置描述设备行为，在本机端口模拟硬件，让上位机照常连接——设备掉线、内网穿透中断时，联调仍然可以继续。
 
-> **当前版本 v0.1**：完成 TCP 自定义帧核心、声明式编解码、规则引擎和实时报文控制台。UDP、串口、MQTT、HTTP/WebSocket、Modbus 和录制回放/故障注入在后续里程碑中实现。
+> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、声明式编解码、规则引擎和实时报文控制台。UDP、串口、MQTT、HTTP/WebSocket、Modbus 和录制回放/故障注入在后续里程碑中实现。
 
 ## 为什么做这个
 
 物联网开发通常依赖厂商硬件，而设备在内网，需要穿透才能访问。穿透通道不稳定、设备偶尔掉线，都会让联调停摆。DeviceForge 把设备侧的行为搬到本地：
 
-- **不用改上位机网络配置**：设备监听 `127.0.0.1:端口`，上位机连本地即可。
+- **不用改上位机网络配置**：设备可以监听 `127.0.0.1:端口` 等待上位机连接；需要模拟设备主动上报时，也可以配置 TCP Client 连接上游。
 - **自定义协议可描述**：魔数、长度字段、字节序、BCD、校验和、请求响应和周期上报都用 YAML 表达。
 - **行为可复现**：同一份配置可以反复启动、停止、重启，状态和报文实时可见。
 - **后续可回放**：透明代理、录制回放和故障注入会把“偶发掉线”变成可回归的测试场景。
@@ -16,12 +16,14 @@
 ## v0.1 已实现
 
 - TCP server 设备（监听本机端口，支持多客户端连接）
+- TCP client 设备（单个上游目标，启动不等待上游，指数退避自动重连）
+- 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
-- 编解码：`raw`（hex/ascii）和声明式 `fields`
+- 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、字典、ACK 重传、数组字段 波形）
 - 字段：`u8/i8/u16/i16/u24/i24/u32/i32/f32/f64`、`bytes`、`string`、`bcd`
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
-- 模板：请求字段、设备状态、计数器、连接信息和随机数
+- 模板：请求字段、设备状态、计数器、连接信息、设备信息和随机数
 - 设备信息：可选的厂商、型号、S/N、硬件/固件版本和厂商自定义 TNS/IMEI 元数据
 - Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看
 - 配置持久化到 `data/devices.json`；报文和运行时状态保存在内存
@@ -154,6 +156,44 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 - 响应规则只需要提供 `cmd/seq/temp/humidity`，常量、长度和 CRC 由 codec 补齐。
 - **Framer 只负责入站分帧**；出站帧由 codec 完整编码，避免两套长度/校验定义冲突。
 
+### 传输方式
+
+`transport.type` 目前支持 `tcp-server` 和 `tcp-client`：
+
+- **`tcp-server`**：设备监听 `host:port`，可接受多个上位机连接。`port: 0` 表示自动分配，实际端口以运行状态中的端点为准。
+- **`tcp-client`**：设备主动连接一个上游 `host:port`，用于模拟设备上报或网关连接。启动时不会等待上游可用；连接失败后按配置自动重连。
+
+TCP Client 示例：
+
+```yaml
+transport:
+  type: tcp-client
+  host: 127.0.0.1
+  port: 9000
+  connectTimeoutMs: 5000
+  reconnect:
+    enabled: true
+    minDelayMs: 500
+    maxDelayMs: 10000
+```
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | 上游地址；可填写局域网或公网目标（仅主动外连） |
+| `port` | 无 | 上游 TCP 端口，必须为 1-65535 |
+| `connectTimeoutMs` | `5000` | 单次建连超时；超时后进入重连流程 |
+| `reconnect.enabled` | `true` | 关闭后，连接失败或意外断线进入 `error`，不再重试 |
+| `reconnect.minDelayMs` | `500` | 第一次重试等待，之后按 ×2 指数增长 |
+| `reconnect.maxDelayMs` | `10000` | 退避等待上限；每次等待带 ±20% 抖动 |
+
+传输状态与设备状态相互独立：设备启动后 `state` 为 `running`，上游暂时不可达时 `transport.state` 会显示 `connecting` 或 `reconnecting`，不会把设备判为启动失败。连接成功、意外断线、重连会分别推送 `connected`、`reconnecting` 等状态，前端会显示重试次数和下一次重试倒计时。
+
+- 每次成功建连都会生成新的连接 ID，并重新执行 `on: connect` 规则；重连后的握手/注册逻辑不需要额外配置。
+- 上游意外断开或连接失败会按退避策略自动重连；每次“故障期”只上报一次错误，后续重试只更新传输状态，避免反复弹出错误提示。
+- 点击连接面板的“断开”或规则使用 `disconnect: true` 属于主动断开：进入 `disconnected` 并暂停自动重连；停止后重新启动设备即可恢复。
+- 断线期间手动发送不会排队，会直接提示没有可用连接。
+- TCP Client 可以连接非本机目标，但方向始终是“设备主动外连”；控制面仍只绑定本机，传输没有 TLS 或认证。
+
 ### 分帧方式
 
 | `framing.type` | 说明 |
@@ -193,6 +233,84 @@ framing:
 
 `checksum.algo` 支持 `sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`，默认写在帧尾、覆盖校验字段之前的全部字节。`endian` 默认值：CRC16/MODBUS 和 CRC32 为 `le`，其余为 `be`；可用 `verify: false` 只展示不阻断规则。
 
+### 通用文本协议（text）
+
+`text` codec 用结构化配置描述任意“分隔符 + 有序字段”的文本协议。核心不包含厂商字段名或报文类型；设备配置决定一切。
+
+```yaml
+framing:
+  type: delimiter
+  delimiterFormat: text
+  delimiter: "\r\n"
+  includeDelimiter: false
+
+codec:
+  type: text
+  separator: ":"
+  terminator: "\r\n"
+  timezone: Asia/Shanghai
+  messages:
+    - name: reading
+      label: 数据上报
+      prefix: "DATA"
+      suffix: "END"
+      slots:
+        - { kind: field, name: deviceCode, type: string }
+        - { kind: field, name: temperature, type: decimal, unit: "℃" }
+        - { kind: field, name: sequence, type: int, optional: true, auto: sequence }
+  session:
+    ackMessage: ack
+    trackMessages: [reading]
+    sequenceField: sequence
+    statusField: status
+    successValues: ["OK"]
+    timeoutMs: 5000
+    maxRetries: 3
+```
+
+**模型**：
+
+- **message**：`name` 出站时由 `fields.kind` 选择；入站按配置顺序匹配 `prefix`、`suffix` 和 `match`（完整 token 下标上的 equals/oneOf/regex/notEquals）。
+- **slot**：`literal`（固定 token）、`field`（普通字段）、`repeat`（计数重复组）。slot 的顺序就是 token 顺序。
+- **field type**：`string`、`int`、`decimal`（保留数值文本）、`timestamp`、`stringList`（默认 `|` 分隔）、`int16Array`（仅由字典 valueFormat 驱动）。
+- **optional**：每条 message 最多一个 optional 字段；解码时会把它前面的字段从左解析、后面的字段从右解析，中间剩余 0/1 个 token 决定是否存在。报表尾部和 ACK 中间的可选流水号都能表达。
+- **repeat**：必须有 `countField`（引用前面的 int 字段）；编码时由数组长度自动计算并覆盖。item 是单个顶层 token，item 内用 `itemSeparator` 分隔，值列表用 `valueSeparator`。`mapField` 会额外生成路径安全索引，例如 `data.item101`，便于模板引用。
+- **auto**：`timestamp` 按 `format`（YYYY/MM/DD/HH/mm/ss）和 codec 时区生成；`sequence` 自动递增。显式传 `null` 可省略 optional 自动字段（如注册包）。
+- **default / defaultFrom**：编码缺省值；`defaultFrom: tnsImei` 等可把设备信息绑定到设备码。
+- **pattern**：解码校验，`error` 判为无效，`warning` 只提示。
+- **dictionaries**：`字典名 → 数据码 → { name, unit, multi, valueFormat }`；repeat 通过 `dictionary` + `keyField` 查表。未知码只记 warning。
+- **session**：配置 ACK 报文、需要跟踪的报文、流水号/状态字段和成功值；不配置就完全没有 ACK/重传行为。
+
+
+
+**ACK 与重传**：
+
+- 满足 `session.trackMessages` 的报文发送后进入待确认队列；收到 `session.ackMessage` 中相同流水号且状态在 `successValues` 内的 ACK 后清除。
+- `timeoutMs` 内未确认会重发同一份原始字节，最多重发 `maxRetries` 次；重试耗尽产生 error 事件和系统流量。
+- 非 OK ACK 保留待确认并继续等待重试；未知 ACK 只记 info。
+- TCP Client 断线时暂停计时器；重连后先执行 `on: connect` 注册/握手，再按顺序恢复未确认报文。TCP Server 某客户端断开时丢弃该连接的 pending。
+- 多连接时每个连接独立确认，互不影响。
+
+**数组字段 波形**：
+
+- 在字典条目上声明 `valueFormat`：
+  ```yaml
+  dictionaries:
+    codes:
+      "220":
+        name: 示例数组
+        unit: Hz
+        valueFormat:
+          type: int16Array
+          points: 1024
+          endian: be
+          encoding: hex       # hex | base64
+          crc: { algo: crc16-modbus, endian: le }
+  ```
+- 编码输入：repeat item 使用 `waveform: [1024 个 int16]`；解码后 item 的 `values` 为空数组，`waveform` 包含 `points`、`crc`、`crcValid`、`encoding`；`mapField` 中只保留摘要，避免重复传输 1024 个点。
+- CRC 校验失败时整帧仍然有效，但波形点被丢弃（`points: null`）并记 warning。
+- `encoding` 支持 `hex` / `base64`，都是文本安全形态。原始二进制波形段会与分隔符 tokenization 冲突，当前不包含；需要时使用 `length-prefix` / `fixed` 分帧配合后续的 binaryBlob 扩展。
+
 ### 设备信息（可选）
 
 `deviceInfo` 用于记录真实硬件铭牌上的身份信息，所有字段可选；没有填写时不会出现在 YAML/JSON 中。
@@ -208,8 +326,8 @@ framing:
 
 - `id` 是 DeviceForge 的平台注册键，和厂商 S/N 相互独立。
 - `serialNumber` 不是认证凭据；需要认证时应使用独立的密钥/证书配置。
-- `tnsImei` 是单个不透明字符串，不做 IMEI/TNS 格式校验，也不强制唯一。
-- 这些字段目前只保存和展示，不参与分帧、编解码、规则、模板、流量日志或协议发送。
+- `tnsImei` 是单个不透明字符串，不做 IMEI/TNS 格式校验，也不强制唯一；`text` codec 可用 `defaultFrom: tnsImei` 把它作为设备码回退值。
+- 所有设备信息都可以在模板中通过 `$device.*` 引用（例如 `$device.tnsImei`）；厂商/型号/版本等仍只用于展示和记录，不直接参与分帧或字段编码。
 - 字段命名参考 LwM2M Device Object、OPC UA DI 等模型中的 Manufacturer/Model/SerialNumber 概念，不是某个具体协议的线格式。
 
 ## 规则与模板
@@ -217,11 +335,11 @@ framing:
 规则触发方式：
 
 - `on: start`：设备启动后执行一次
-- `on: connect`：每个客户端连接时执行
+- `on: connect`：每次连接建立时执行；TCP Client 每次重连后也会重新执行
 - `on: frame` + `match`：收到匹配的帧时执行；不写 `match` 表示匹配所有帧
 - `every: 毫秒`：周期执行，可配 `jitter`；`target: all | last` 控制广播还是发给最近连接
 
-`set` 在发送前更新设备状态。`send` 可以是单个消息或消息数组；`disconnect: true` 会在发送后断开当前连接。
+`set` 在发送前更新设备状态。`send` 可以是单个消息或消息数组；`disconnect: true` 会在发送后断开当前连接。对 TCP Client 来说，主动断开会暂停自动重连，重启设备后恢复。
 
 匹配值支持字面量，也支持：
 
@@ -241,12 +359,14 @@ match:
 | `$state.temp` | 设备状态变量 |
 | `$counter.tx` / `$counter.rx` | 已发送/已接收帧计数（读取当前值，发送后递增） |
 | `$conn.remoteAddress` | 当前连接信息 |
+| `$device.tnsImei` | 设备信息中的 TNS/IMEI、型号、序列号等 |
+\| `$req.data.item001.value` | 重复组中第一个数据项的值 |
 | `$now` | 当前时间戳（毫秒） |
 | `${random(20,30)}` | 闭区间随机整数 |
 | `${randomFloat(20,30)}` | 保留两位小数的随机浮点数 |
 | `${and(state.online, state.temp > 20)}` | 逻辑与；还支持 `or`/`not`、`&&`/`||`/`!` |
 | `${state.temp + 1}` | 算术；支持 `+ - * / %`、比较和括号 |
-| `seq=${req.seq}` | 字符串插值；`${...}` 内可以写 `req.*`、`state.*`、`counter.*`、`conn.*` |
+| `seq=${req.seq}` | 字符串插值；`${...}` 内可以写 `req.*`、`state.*`、`counter.*`、`conn.*`、`device.*` |
 
 - `${...}` 支持数字/字符串/布尔/null、路径、括号，以及 `random`、`randomFloat`、`and`、`or`、`not`；运算符包括 `+ - * / %`、`== != < <= > >=`、`&& || !`。
 - `==`/`!=` 是严格相等；关系比较只接受两个数字或两个字符串（字符串按 JS 顺序比较），算术只接受有限数字；真值判断同 JS。
@@ -273,7 +393,7 @@ match:
 ## 项目结构
 
 ```text
-packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP transport
+packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP Server/Client transport
 packages/server    Fastify REST + WebSocket + JSON 持久化 + 静态托管
 packages/web       React + Vite + Tailwind 控制台
 presets/           内置 YAML 预设
@@ -299,10 +419,16 @@ pnpm start           # 生产模式（需要先 build）
 - length-prefix 半包、粘包、多帧、超长帧
 - delimiter（hex/text 分隔符、UTF-8 多字节跨包）、fixed、raw 分帧
 - 字段编解码回环、CRC 校验失败、固定长度/剩余长度/fromField
+- 通用 `text` codec：prefix/suffix/match、optional 字段、自动时间戳/流水号、repeat/字典/mapField、pattern 警告和异常帧
+- 文本 codec 集成：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
+- ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP Client 暂停/重连恢复、TCP Server 断连丢弃、stop 清理
+- 数组字段：int16 BE、CRC16/Modbus 已知向量、hex/base64 round-trip、CRC 失败丢弃、CRC 字节序
 - 模板求值（路径、算术、比较、布尔函数、插值扫描、错误和限制）、模板补全 token/候选/插入，以及字段匹配
 - 真实 `node:net` 客户端连 TCP 设备：握手、请求响应、手动发送、错误 CRC 不触发规则
+- TCP Client 传输：目标未启动时正常启动、自动重连、主动断开暂停、关闭重连、收发与字节计数
+- TCP Client 设备运行时集成：重连后重新执行 `on: connect`、断线发送报错、设备状态保持 `running`
 - 设备信息 `deviceInfo` 的 schema 解析和 Web 端元数据归一化/摘要
-- Web 端配置默认值、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
+- Web 端配置默认值、传输展示/状态文案、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
 
 本地文档统一放在 `docs/`；该目录已加入 `.gitignore`，不会进入版本库。
 
@@ -315,20 +441,20 @@ pnpm start           # 生产模式（需要先 build）
 | `DEVICEFORGE_DATA_DIR` | `<repo>/data` | 设备配置存储目录 |
 | `LOG_LEVEL` | `info` | Fastify/Pino 日志级别 |
 
-模拟设备自身监听的地址和端口由设备配置中的 `transport.host/port` 决定，默认只监听本机。
+模拟设备的端点由设备配置中的 `transport` 决定：TCP Server 监听 `transport.host/port`，TCP Client 主动连接该目标；控制面本身仍只绑定本机。
 
 ## 路线图
 
 | 里程碑 | 内容 |
 | --- | --- |
-| **M2 传输扩展** | TCP client（自动重连）、UDP、串口；MQTT broker/client；HTTP server；WebSocket server；虚拟串口（Linux/macOS socat，Windows com0com） |
+| **M2 传输扩展（进行中）** | TCP Server / TCP Client（已支持）；UDP（下一阶段）、串口；MQTT broker/client；HTTP server；WebSocket server；虚拟串口（Linux/macOS socat，Windows com0com） |
 | **M3 Modbus** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
 | **M4 可靠性** | JS script codec（worker + vm）、故障注入（延迟/丢包/断连/损坏）、透明代理、录制回放、虚拟时钟、多设备场景、CI |
 | **更远** | CoAP、OPC UA、BACnet、BLE、pcapng 导出、可视化协议编辑器、Docker 发行 |
 
 ## 已知限制
 
-- v0.1 只实现 TCP server transport；UDP、串口、MQTT、HTTP/WebSocket 仍在路线图中。
+- 当前只实现 TCP Server / TCP Client transport；TCP Client 为单目标，UDP、串口、MQTT、HTTP/WebSocket 仍在路线图中。
 - 配置会持久化；**报文历史和运行时状态不会跨服务重启保留**。重启后状态回到配置中的 `state`。
 - 可视化编辑会重新生成 YAML，源码模式中的注释和原格式只在当前编辑会话、且未做可视化修改时保留；服务端本身只存 JSON。
 - 模板补全只在可视化模板输入中提供；YAML/JSON 源码模式没有补全。
@@ -340,5 +466,6 @@ pnpm start           # 生产模式（需要先 build）
 
 - **入站分帧、出站编码**：Framer 只拆分字节流，Codec 负责完整帧的编码/解码（含长度、常量、校验）。
 - **设备状态是设备级的**：`state` 被所有连接共享；`req/conn/counter` 是请求或连接上下文。
+- **运行状态与传输状态分离**：设备是否启动由 `status.state` 表示，连接/重连由 `status.transport` 表示；上游不可达不会把设备判为启动失败。
 - **规则按顺序执行**：一帧可以命中多条规则；每条规则的 `set` 在发送前生效。
 - **HTTP 控制面和模拟数据面分离**：控制面固定在本机端口；模拟设备端口独立配置，互不影响。

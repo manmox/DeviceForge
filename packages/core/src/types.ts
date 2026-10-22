@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TransportConfig } from './schema/device';
 
 export const ConnectionInfoSchema = z.object({
   id: z.string(),
@@ -38,10 +39,28 @@ export type TrafficEvent = z.infer<typeof TrafficEventSchema>;
 
 export type DeviceRuntimeState = 'stopped' | 'starting' | 'running' | 'error';
 
+export type TransportState =
+  | 'idle'
+  | 'listening'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'disconnected'
+  | 'error';
+
+export interface TransportStatus {
+  kind: TransportConfig['type'];
+  state: TransportState;
+  error?: string;
+  attempt?: number;
+  nextRetryAt?: number;
+}
+
 export interface DeviceStatus {
   deviceId: string;
   state: DeviceRuntimeState;
   error?: string;
+  transport: TransportStatus;
   endpoints: string[];
   connections: ConnectionInfo[];
   startedAt?: number;

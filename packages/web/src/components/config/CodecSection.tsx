@@ -18,10 +18,12 @@ import {
 } from '../form/FormControls';
 import { FormSection } from '../form/FormSection';
 import { FieldDefCard } from './FieldDefCard';
+import { TextCodecFields } from './TextCodecFields';
 
 const CODEC_OPTIONS: SelectOption<CodecConfig['type']>[] = [
   { value: 'raw', label: 'raw · 原始字节' },
   { value: 'fields', label: 'fields · 声明式字段' },
+  { value: 'text', label: 'text · 分隔符协议' },
 ];
 
 const CHECKSUM_OPTIONS: SelectOption<ChecksumConfig['algo']>[] = [
@@ -46,7 +48,9 @@ export function CodecSection({
   active?: boolean;
 }) {
   const codec = config.codec;
-  const lastFieldsCodec = useRef<Extract<CodecConfig, { type: 'fields' }> | null>(null);
+  const codecDrafts = useRef<Partial<Record<CodecConfig['type'], CodecConfig>>>(
+    {},
+  );
   const displayError = useIssueText('codec.display');
   const checksumError = useIssueText('codec.checksum');
   const fieldIssues = useIssues('codec.fields');
@@ -112,19 +116,13 @@ export function CodecSection({
 
   function changeType(type: CodecConfig['type']) {
     if (type === codec.type) return;
-    if (codec.type === 'fields') lastFieldsCodec.current = codec;
-    if (type === 'raw') {
-      onChange({ ...config, codec: defaultCodec('raw') });
-      return;
-    }
-    const fallback = defaultCodec('fields');
-    const stored = lastFieldsCodec.current;
-    const next: Extract<CodecConfig, { type: 'fields' }> =
-      stored ??
-      (fallback.type === 'fields'
-        ? fallback
-        : { type: 'fields', fields: [defaultField('u8', 'payload')] });
-    onChange({ ...config, codec: next });
+    // 每种 codec 保留自己的草稿；在 raw / fields / text 之间切换时不会
+    // 清空用户已经填写的协议参数。
+    codecDrafts.current[codec.type] = codec;
+    onChange({
+      ...config,
+      codec: codecDrafts.current[type] ?? defaultCodec(type),
+    });
   }
 
   function updateFields(fields: FieldDef[]) {
@@ -203,6 +201,22 @@ export function CodecSection({
     updateFields(codec.fields.filter((_, itemIndex) => itemIndex !== index));
   }
 
+  function useCrlfFraming() {
+    const includeDelimiter =
+      config.framing.type === 'delimiter'
+        ? config.framing.includeDelimiter
+        : false;
+    onChange({
+      ...config,
+      framing: {
+        type: 'delimiter',
+        delimiterFormat: 'text',
+        delimiter: '\r\n',
+        includeDelimiter,
+      },
+    });
+  }
+
   function setChecksumEnabled(enabled: boolean) {
     if (codec.type !== 'fields') return;
     if (!enabled) {
@@ -215,7 +229,11 @@ export function CodecSection({
   return (
     <FormSection
       title="编解码"
-      description="字段顺序就是线上字节顺序；常量、长度和校验由 codec 自动补齐。"
+      description={
+        codec.type === 'text'
+          ? '用报文、槽位、分隔符和数据字典描述文本协议；时间戳、流水号和 ACK 均可配置。'
+          : '字段顺序就是线上字节顺序；常量、长度和校验由 codec 自动补齐。'
+      }
       icon={<Braces className="h-4 w-4 text-accent-400" />}
       path="codec"
       actions={
@@ -261,6 +279,29 @@ export function CodecSection({
             <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] leading-5 text-mist-500">
               raw 编解码不会解析字段；发送 fields 时可用键为 hex、text 或 data（0-255 数组）。
             </div>
+          </>
+        )}
+
+        {codec.type === 'text' && (
+          <>
+            <TextCodecFields
+              codec={codec}
+              onChange={(next) => onChange({ ...config, codec: next })}
+              disabled={disabled}
+            />
+            {codec.terminator === '\r\n' && config.framing.type !== 'delimiter' && (
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3 py-2 text-[10.5px] leading-4 text-amber-200">
+                text codec 默认以 CRLF 结束报文；当前分帧方式不会按 CRLF 切分入站数据。
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm ml-2"
+                  onClick={useCrlfFraming}
+                  disabled={disabled}
+                >
+                  使用 CRLF 分帧
+                </button>
+              </div>
+            )}
           </>
         )}
 

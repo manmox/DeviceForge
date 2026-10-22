@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useJsonDraft } from '../hooks/useJsonDraft';
 import { codecFieldSuggestions, defaultFieldsForCodec } from '../lib/codec-fields';
 import { templateRootsFor } from '../lib/template-suggestions';
+import { transportPresentation } from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 import { CodeEditor } from './CodeEditor';
 import { EditorModeToggle } from './form/EditorModeToggle';
@@ -32,8 +33,14 @@ export function SendPanel() {
       roots: templateRootsFor('manual-send'),
       codec: device?.config.codec,
       state: device?.state ?? device?.config.state ?? {},
+      deviceInfo: device?.config.deviceInfo,
     }),
-    [device?.config.codec, device?.state, device?.config.state],
+    [
+      device?.config.codec,
+      device?.config.deviceInfo,
+      device?.state,
+      device?.config.state,
+    ],
   );
 
   const [payloadMode, setPayloadMode] = useState<'hex' | 'fields'>('hex');
@@ -52,7 +59,10 @@ export function SendPanel() {
 
   if (!device) return null;
 
+  const presentation = transportPresentation(device.config.transport.type);
   const connected = connections.length > 0;
+  const paused = device.status.transport.state === 'disconnected';
+  const failed = device.status.transport.state === 'error';
   const displayError = error ?? draft.error;
 
   async function handleSend() {
@@ -96,13 +106,23 @@ export function SendPanel() {
           <Send className="h-3.5 w-3.5 text-accent-400" />
           手动发送
         </span>
-        <span className="chip">→ 最新连接</span>
+        <span className="chip">{presentation.sendTargetLabel}</span>
         {connected ? (
           <span className="text-[11px] text-accent-400">
-            {connections.length} 个连接可用
+            {connections.length} {presentation.connectionUnit}可用
           </span>
         ) : (
-          <span className="text-[11px] text-amber-400">等待上位机连接</span>
+          <span
+            className={`text-[11px] ${
+              failed ? 'text-rose-300' : 'text-amber-400'
+            }`}
+          >
+            {paused
+              ? presentation.pausedLabel
+              : failed
+                ? `${presentation.isOutbound ? '上游' : '连接'}失败，查看上方传输状态`
+                : presentation.waitingLabel}
+          </span>
         )}
         {sent && (
           <span className="inline-flex items-center gap-1 text-[11px] text-accent-400">
@@ -155,7 +175,9 @@ export function SendPanel() {
               <span className="text-[10.5px] text-mist-500">
                 {codec?.type === 'fields'
                   ? '按 codec 字段填写；值支持模板；缺少必填字段发送会报错。'
-                  : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
+                  : codec?.type === 'text'
+                    ? 'kind 选择报文；repeat 用数组；optional 可用 null 省略；时间戳和流水号可自动补齐。'
+                    : 'raw codec 可用键：hex / text / data（0-255 数组）。'}
               </span>
               <button
                 className="btn btn-ghost btn-sm ml-auto"

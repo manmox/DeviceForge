@@ -1,4 +1,5 @@
 import type { DeviceConfig } from '@deviceforge/core';
+import { TextCodecSchema } from '@deviceforge/core/schema';
 import { describe, expect, it } from 'vitest';
 import {
   firstIssueSection,
@@ -91,11 +92,40 @@ describe('issueItemIndex', () => {
 describe('sectionHint', () => {
   it('summarizes the current config per section', () => {
     expect(sectionHint(config, 'deviceInfo')).toBe('S/N SN-0001');
-    expect(sectionHint(config, 'transport')).toBe('127.0.0.1:19001');
+    expect(sectionHint(config, 'transport')).toBe(
+      'TCP Server · 127.0.0.1:19001',
+    );
     expect(sectionHint(config, 'framing')).toBe('长度字段');
     expect(sectionHint(config, 'codec')).toBe('fields · 2 字段');
     expect(sectionHint(config, 'state')).toBe('2 个变量');
     expect(sectionHint(config, 'rules')).toBe('0 条规则');
+  });
+
+  it('summarizes the text codec message count and separator', () => {
+    const text: DeviceConfig = {
+      ...config,
+      codec: TextCodecSchema.parse({
+        type: 'text',
+        messages: [{ name: 'report', slots: [{ kind: 'field', name: 'value', type: 'string' }] }],
+      }),
+    };
+    expect(sectionHint(text, 'codec')).toBe('text · 1 报文 · 「:」');
+  });
+
+  it('summarizes a tcp-client target', () => {
+    const client: DeviceConfig = {
+      ...config,
+      transport: {
+        type: 'tcp-client',
+        host: '127.0.0.1',
+        port: 9000,
+        connectTimeoutMs: 5_000,
+        reconnect: { enabled: true, minDelayMs: 500, maxDelayMs: 10_000 },
+      },
+    };
+    expect(sectionHint(client, 'transport')).toBe(
+      'TCP Client · 127.0.0.1:9000',
+    );
   });
 
   it('summarizes text and hex delimiters readably', () => {

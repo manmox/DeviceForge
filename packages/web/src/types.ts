@@ -3,9 +3,16 @@ import type {
   DeviceConfig,
   DeviceStatus,
   TrafficEvent,
+  TransportStatus,
 } from '@deviceforge/core';
 
-export type { ConnectionInfo, DeviceConfig, DeviceStatus, TrafficEvent };
+export type {
+  ConnectionInfo,
+  DeviceConfig,
+  DeviceStatus,
+  TrafficEvent,
+  TransportStatus,
+};
 
 export interface DeviceSummary {
   config: DeviceConfig;

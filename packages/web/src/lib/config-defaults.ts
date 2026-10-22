@@ -1,3 +1,7 @@
+import {
+  DEFAULT_RECONNECT_CONFIG,
+  TextCodecSchema,
+} from '@deviceforge/core/schema';
 import type {
   ChecksumConfig,
   CodecConfig,
@@ -6,6 +10,9 @@ import type {
   FramingConfig,
   OutgoingMessage,
   Rule,
+  TcpClientTransport,
+  TcpServerTransport,
+  TransportConfig,
 } from '@deviceforge/core';
 import { fieldNeedsLength, isMultiByteFieldType, isNumericFieldType } from './codec-fields';
 import { withRuleTrigger, type RuleTrigger } from './rule-shape';
@@ -40,6 +47,17 @@ export function defaultField(type: FieldDef['type'], name = 'payload'): FieldDef
 
 export function defaultCodec(type: CodecConfig['type']): CodecConfig {
   if (type === 'raw') return { type: 'raw', display: 'hex' };
+  if (type === 'text') {
+    return TextCodecSchema.parse({
+      type: 'text',
+      messages: [
+        {
+          name: 'message',
+          slots: [{ kind: 'field', name: 'payload', type: 'string' }],
+        },
+      ],
+    });
+  }
   return {
     type: 'fields',
     fields: [{ name: 'payload', type: 'bytes', length: 'remaining' }],
@@ -75,11 +93,48 @@ export function uniqueDeviceId(existing: Iterable<string>, base = 'my-device'): 
   return `${base}-${index}`;
 }
 
+export function defaultTransport(type: 'tcp-server'): TcpServerTransport;
+export function defaultTransport(type: 'tcp-client'): TcpClientTransport;
+export function defaultTransport(type: TransportConfig['type']): TransportConfig;
+export function defaultTransport(type: TransportConfig['type']): TransportConfig {
+  if (type === 'tcp-client') {
+    return {
+      type: 'tcp-client',
+      host: '127.0.0.1',
+      port: 19001,
+      connectTimeoutMs: 5_000,
+      reconnect: { ...DEFAULT_RECONNECT_CONFIG },
+    };
+  }
+  return { type: 'tcp-server', host: '127.0.0.1', port: 19010 };
+}
+
+export function changeTransportType(
+  current: TransportConfig,
+  type: TransportConfig['type'],
+): TransportConfig {
+  if (current.type === type) return current;
+
+  const host = current.host || '127.0.0.1';
+  if (type === 'tcp-client') {
+    const defaults = defaultTransport('tcp-client');
+    return {
+      ...defaults,
+      host,
+      // 监听端口 0 表示自动分配，切到 client 后没有意义。
+      port: current.port > 0 ? current.port : defaults.port,
+    };
+  }
+
+  const defaults = defaultTransport('tcp-server');
+  return { ...defaults, host, port: current.port };
+}
+
 export function createBlankConfig(): DeviceConfig {
   return {
     id: 'my-device',
     name: '我的设备',
-    transport: { type: 'tcp-server', host: '127.0.0.1', port: 19010 },
+    transport: defaultTransport('tcp-server'),
     framing: { type: 'raw' },
     codec: { type: 'raw', display: 'hex' },
     state: {},

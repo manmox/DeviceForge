@@ -8,13 +8,15 @@ import {
   Terminal,
   Waypoints,
 } from 'lucide-react';
+import { transportPresentation } from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 
 const FEATURES = [
   {
     icon: Cable,
-    title: '本地端口直连',
-    description: '上位机照常连 127.0.0.1，不用改网络拓扑，也不用等内网穿透恢复。',
+    title: '监听或主动连接',
+    description:
+      '设备可以监听本地端口等待上位机接入，也可以主动连接上游网关；不用改网络拓扑，也不用等内网穿透恢复。',
   },
   {
     icon: Waypoints,
@@ -83,7 +85,7 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
 
         <div className="mt-8 flex flex-wrap items-center gap-2 text-[11px] text-mist-500">
           <span className="chip border-accent-500/20 text-accent-300">
-            <Terminal className="h-3 w-3" /> TCP 自定义帧（已支持）
+            <Terminal className="h-3 w-3" /> TCP Server / Client（已支持）
           </span>
           <span className="chip opacity-70">
             <Radio className="h-3 w-3 text-sky-400" /> MQTT · 规划中
@@ -92,7 +94,9 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
             <Cpu className="h-3 w-3 text-violet-400" /> Modbus · 规划中
           </span>
           <span className="chip opacity-70">HTTP / WebSocket · 规划中</span>
-          <span className="text-mist-500">v0.1 先交付 TCP 自定义帧核心</span>
+          <span className="text-mist-500">
+            v0.1 先交付 TCP 自定义帧核心 · 支持监听与主动连接
+          </span>
         </div>
 
         <section id="presets" className="mt-14 scroll-mt-6">
@@ -127,7 +131,9 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
                 >
                   <div className="flex w-full items-center justify-between gap-2">
                     <span className="chip font-mono text-[10px]">
-                      TCP :{preset.config.transport.port}
+                      {transportPresentation(preset.config.transport.type).kindLabel}
+                      {' :'}
+                      {preset.config.transport.port}
                     </span>
                     <ArrowRight className="h-4 w-4 text-mist-500 transition-transform group-hover:translate-x-0.5 group-hover:text-accent-400" />
                   </div>

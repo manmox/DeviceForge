@@ -1,4 +1,5 @@
 import type { CodecConfig, FieldDef } from '@deviceforge/core';
+import { TextCodecSchema } from '@deviceforge/core/schema';
 import { describe, expect, it } from 'vitest';
 import {
   codecFieldSuggestions,
@@ -20,6 +21,52 @@ const fields: FieldDef[] = [
 
 const fieldsCodec: CodecConfig = { type: 'fields', fields };
 const rawCodec: CodecConfig = { type: 'raw', display: 'hex' };
+const textCodec: CodecConfig = TextCodecSchema.parse({
+  type: 'text',
+  messages: [
+    {
+      name: 'report',
+      slots: [
+        { kind: 'field', name: 'deviceCode', type: 'string' },
+        { kind: 'field', name: 'count', type: 'int' },
+        {
+          kind: 'repeat',
+          name: 'groups',
+          countField: 'count',
+          itemSeparator: '*',
+          keyField: 'id',
+          mapField: 'data',
+          mapKeyPrefix: 'c',
+          dictionary: 'codes',
+          fields: [
+            { kind: 'field', name: 'id', type: 'string' },
+            { kind: 'field', name: 'values', type: 'stringList' },
+          ],
+        },
+        {
+          kind: 'field',
+          name: 'timestamp',
+          type: 'timestamp',
+          format: 'YYYY-MM-DD HH-mm-ss',
+          auto: 'timestamp',
+        },
+        {
+          kind: 'field',
+          name: 'sequence',
+          type: 'int',
+          optional: true,
+          auto: 'sequence',
+        },
+      ],
+    },
+  ],
+  dictionaries: {
+    codes: {
+      '000': { name: '电压', unit: 'V' },
+      '001': { name: '电流', unit: 'A' },
+    },
+  },
+});
 
 describe('field type helpers', () => {
   it('classifies numeric and variable-length types', () => {
@@ -47,6 +94,15 @@ describe('defaultFieldsForCodec', () => {
   it('uses hex for raw codec', () => {
     expect(defaultFieldsForCodec(rawCodec)).toEqual({ hex: '' });
   });
+
+  it('uses the first text message and one dictionary sample group', () => {
+    expect(defaultFieldsForCodec(textCodec)).toEqual({
+      kind: 'report',
+      deviceCode: 'value',
+      count: 0,
+      groups: [{ id: '000', values: ['0'] }],
+    });
+  });
 });
 
 describe('field suggestions', () => {
@@ -71,6 +127,26 @@ describe('field suggestions', () => {
       { name: 'data' },
     ]);
     expect(codecMatchFieldSuggestions(rawCodec)).toEqual(['hex', 'ascii', 'length']);
+  });
+
+  it('suggests text codec fields and map indexes', () => {
+    expect(codecFieldSuggestions(textCodec).map((item) => item.name)).toEqual([
+      'kind',
+      'deviceCode',
+      'count',
+      'groups',
+      'timestamp',
+      'sequence',
+    ]);
+    expect(codecMatchFieldSuggestions(textCodec)).toEqual([
+      '_message',
+      'deviceCode',
+      'count',
+      'groups',
+      'timestamp',
+      'sequence',
+      'data',
+    ]);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { formatTime, summarizeDecoded } from '../lib/format';
+import { transportPresentation } from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 import type { TrafficEvent } from '../types';
 import { EventDetail } from './EventDetail';
@@ -119,6 +120,8 @@ export function TrafficPanel() {
 
   if (!device) return null;
 
+  const presentation = transportPresentation(device.config.transport.type);
+
   function handleScroll() {
     const element = scrollRef.current;
     if (!element) return;
@@ -216,7 +219,7 @@ export function TrafficPanel() {
                   </div>
                   <h3 className="mt-3 text-sm font-medium text-mist-200">还没有报文</h3>
                   <p className="mt-1.5 text-xs leading-5 text-mist-500">
-                    启动设备后，让上位机连接本地端口；收发报文会实时出现在这里。
+                    {presentation.trafficEmptyHint}
                     也可以用上方面板手动发送一帧。
                   </p>
                 </div>
@@ -295,6 +298,7 @@ export function TrafficPanel() {
           {selected && (
             <EventDetail
               event={selected}
+              codec={device?.config.codec}
               className="max-h-[70vh] xl:max-h-none xl:w-[390px] xl:shrink-0"
             />
           )}

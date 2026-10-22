@@ -54,6 +54,10 @@ export function formatValue(value: unknown): string {
 
 export function summarizeDecoded(decoded: Record<string, unknown> | undefined): string {
   if (!decoded) return '';
+  if (typeof decoded._summary === 'string' && decoded._summary.length > 0) {
+    return decoded._summary;
+  }
+
   const entries = Object.entries(decoded).filter(([key]) => !key.startsWith('_'));
   if (entries.length === 0) return '';
   const summary = entries.map(([key, value]) => `${key}=${formatValue(value)}`).join('  ');

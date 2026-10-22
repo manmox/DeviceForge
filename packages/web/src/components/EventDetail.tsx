@@ -1,7 +1,9 @@
+import type { CodecConfig } from '@deviceforge/core';
 import { ArrowDownLeft, ArrowUpRight, Circle, FileCode2 } from 'lucide-react';
 import { formatTime, formatValue } from '../lib/format';
 import type { TrafficEvent } from '../types';
 import { HexDump } from './HexDump';
+import { TextMessageDetail } from './TextMessageDetail';
 
 function DirectionLabel({ direction }: { direction: TrafficEvent['direction'] }) {
   if (direction === 'in') {
@@ -30,15 +32,18 @@ function DirectionLabel({ direction }: { direction: TrafficEvent['direction'] })
 
 export function EventDetail({
   event,
+  codec,
   className = '',
 }: {
   event: TrafficEvent;
+  codec?: CodecConfig;
   className?: string;
 }) {
   const fields = Object.entries(event.decoded ?? {}).filter(([key]) => !key.startsWith('_'));
   const checksum = event.decoded?._checksum;
   const checksumValid = event.decoded?._checksumValid;
   const warnings = event.decoded?._warnings;
+  const protocol = event.decoded?._codec === 'text';
 
   return (
     <aside className={`panel flex min-h-0 flex-col overflow-hidden ${className}`}>
@@ -102,25 +107,34 @@ export function EventDetail({
           </section>
         )}
 
-        {fields.length > 0 && (
+        {protocol && event.decoded ? (
           <section className="mt-4">
             <h4 className="mb-1.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">
-              解码字段
+              协议字段
             </h4>
-            <div className="divide-y divide-white/5 rounded-lg border border-white/10">
-              {fields.map(([key, value]) => (
-                <div
-                  key={key}
-                  className="flex items-start justify-between gap-3 px-2.5 py-1.5"
-                >
-                  <span className="shrink-0 font-mono text-[11px] text-mist-500">{key}</span>
-                  <span className="break-all text-right font-mono text-[11px] text-mist-200">
-                    {formatValue(value)}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <TextMessageDetail decoded={event.decoded} codec={codec} />
           </section>
+        ) : (
+          fields.length > 0 && (
+            <section className="mt-4">
+              <h4 className="mb-1.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">
+                解码字段
+              </h4>
+              <div className="divide-y divide-white/5 rounded-lg border border-white/10">
+                {fields.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-start justify-between gap-3 px-2.5 py-1.5"
+                  >
+                    <span className="shrink-0 font-mono text-[11px] text-mist-500">{key}</span>
+                    <span className="break-all text-right font-mono text-[11px] text-mist-200">
+                      {formatValue(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )
         )}
 
         {checksum !== undefined && (

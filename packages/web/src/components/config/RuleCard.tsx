@@ -1,4 +1,9 @@
-import type { CodecConfig, OutgoingMessage, Rule } from '@deviceforge/core';
+import type {
+  CodecConfig,
+  DeviceInfo,
+  OutgoingMessage,
+  Rule,
+} from '@deviceforge/core';
 import {
   ArrowDown,
   ArrowUp,
@@ -36,7 +41,7 @@ import { MessageEditor } from './MessageEditor';
 
 const TRIGGER_OPTIONS: SelectOption<RuleTrigger>[] = [
   { value: 'start', label: '启动时' },
-  { value: 'connect', label: '客户端连接时' },
+  { value: 'connect', label: '连接建立时' },
   { value: 'frame', label: '收到帧时' },
   { value: 'interval', label: '周期执行' },
 ];
@@ -50,6 +55,7 @@ export function RuleCard({
   total,
   codec,
   state,
+  deviceInfo,
   onChange,
   onMove,
   onDuplicate,
@@ -63,6 +69,7 @@ export function RuleCard({
   total: number;
   codec: CodecConfig;
   state: Record<string, unknown>;
+  deviceInfo?: DeviceInfo;
   onChange: (next: Rule) => void;
   onMove: (direction: -1 | 1) => void;
   onDuplicate: () => void;
@@ -79,12 +86,22 @@ export function RuleCard({
     [state],
   );
   const setCompletion = useMemo(
-    () => ({ roots: templateRootsFor('rule-set', trigger), codec, state }),
-    [trigger, codec, state],
+    () => ({
+      roots: templateRootsFor('rule-set', trigger),
+      codec,
+      state,
+      deviceInfo,
+    }),
+    [trigger, codec, state, deviceInfo],
   );
   const sendCompletion = useMemo(
-    () => ({ roots: templateRootsFor('rule-send', trigger), codec, state }),
-    [trigger, codec, state],
+    () => ({
+      roots: templateRootsFor('rule-send', trigger),
+      codec,
+      state,
+      deviceInfo,
+    }),
+    [trigger, codec, state, deviceInfo],
   );
   const summaryParts = ruleSummaryParts(rule);
   if (summaryParts[0] === RULE_TRIGGER_LABELS[trigger]) summaryParts.shift();
@@ -411,7 +428,7 @@ export function RuleCard({
             <div className="rounded-lg border border-white/5 bg-white/[0.015] p-2.5">
               <SwitchRow
                 label="发送后断开连接"
-                hint="仅在连接或收到帧触发时有效。"
+                hint="仅在连接或收到帧触发时有效；TCP Client 会暂停自动重连，重启设备后恢复。"
                 checked={rule.disconnect}
                 onChange={(disconnect) => patch({ disconnect })}
                 disabled={disabled}

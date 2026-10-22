@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
 import type { TcpServerTransport } from '../schema/device';
-import type { ConnectionInfo } from '../types';
+import type { ConnectionInfo, TransportStatus } from '../types';
 import type { TransportAdapter, TransportEvents } from './types';
 
 interface ActiveConnection {
@@ -13,6 +13,12 @@ function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
+function formatEndpoint(host: string, port: number): string {
+  const formattedHost =
+    host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${formattedHost}:${port}`;
+}
+
 export class TcpServerTransportAdapter implements TransportAdapter {
   readonly kind = 'tcp-server';
 
@@ -21,6 +27,7 @@ export class TcpServerTransportAdapter implements TransportAdapter {
   private readonly active = new Map<string, ActiveConnection>();
   private endpointList: string[] = [];
   private lastId?: string;
+  private currentStatus: TransportStatus = { kind: 'tcp-server', state: 'idle' };
 
   constructor(private readonly config: TcpServerTransport) {}
 
@@ -35,6 +42,7 @@ export class TcpServerTransportAdapter implements TransportAdapter {
       const onError = (error: Error) => {
         server.off('listening', onListening);
         this.server = undefined;
+        this.setStatus({ state: 'error', error: error.message });
         reject(error);
       };
       const onListening = () => {
@@ -48,16 +56,22 @@ export class TcpServerTransportAdapter implements TransportAdapter {
 
     const address = server.address();
     if (address && typeof address === 'object') {
-      this.endpointList = [`${address.address}:${address.port}`];
+      this.endpointList = [formatEndpoint(address.address, address.port)];
     } else {
-      this.endpointList = [`${this.config.host}:${this.config.port}`];
+      this.endpointList = [
+        formatEndpoint(this.config.host, this.config.port),
+      ];
     }
+    this.setStatus({ state: 'listening', error: undefined });
   }
 
   async stop(): Promise<void> {
     const server = this.server;
+    const events = this.events;
     this.server = undefined;
     this.events = undefined;
+    this.currentStatus = { kind: 'tcp-server', state: 'idle' };
+    events?.onStatus(this.status());
 
     for (const connection of this.active.values()) {
       connection.socket.destroy();
@@ -122,6 +136,15 @@ export class TcpServerTransportAdapter implements TransportAdapter {
 
   lastConnectionId(): string | undefined {
     return this.lastId;
+  }
+
+  status(): TransportStatus {
+    return { ...this.currentStatus };
+  }
+
+  private setStatus(patch: Partial<TransportStatus>): void {
+    this.currentStatus = { ...this.currentStatus, ...patch };
+    this.events?.onStatus(this.status());
   }
 
   private handleSocket(socket: Socket): void {
