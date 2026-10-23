@@ -2,7 +2,7 @@
 
 本地运行的物联网设备仿真工作台。用配置描述设备行为，在本机端口模拟硬件，让上位机照常连接——设备掉线、内网穿透中断时，联调仍然可以继续。
 
-> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、MQTT Client 与内嵌 Broker、声明式编解码、规则引擎和实时报文控制台。UDP、串口、HTTP/WebSocket、Modbus 和录制回放/故障注入仍在路线图中。
+> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、MQTT Client 与内嵌 Broker、声明式编解码、规则引擎、故障注入、流量录制回看和实时报文控制台。UDP、串口、HTTP/WebSocket 与 Modbus 仍在路线图中。
 
 ## 为什么做这个
 
@@ -11,7 +11,7 @@
 - **不用改上位机网络配置**：设备可以监听 `127.0.0.1:端口` 等待上位机连接；需要模拟设备主动上报时，也可以配置 TCP Client 连接上游。
 - **自定义协议可描述**：魔数、长度字段、字节序、BCD、校验和、请求响应和周期上报都用 YAML 表达。
 - **行为可复现**：同一份配置可以反复启动、停止、重启，状态和报文实时可见。
-- **后续可回放**：透明代理、录制回放和故障注入会把“偶发掉线”变成可回归的测试场景。
+- **故障可复现**：按方向、概率或包序号配置延迟、丢弃、断连和单 bit 损坏；录制会话保留收发流量和解码结果，便于事后回看。
 
 ## v0.1 已实现
 
@@ -25,10 +25,13 @@
 - 字段：`u8/i8/u16/i16/u24/i24/u32/i32/f32/f64`、`bytes`、`string`、`bcd`
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
+- 故障注入：TCP 字节流分段、MQTT 消息级故障规则，支持延迟、丢弃、断连和单 bit 损坏
+- 流量录制回看：逐设备手动录制，保存收发事件和解码结果，支持时间轴、暂停、倍速、单步和删除
 - 模板：请求字段、设备状态、计数器、连接信息、设备信息和随机数
 - 设备信息：可选的厂商、型号、S/N、硬件/固件版本和厂商自定义 TNS/IMEI 元数据
 - Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看、全局数据字典管理
 - 配置持久化到 `data/devices.json`，本机自定义字典持久化到 `data/dictionaries.json`；报文和运行时状态保存在内存
+- 录制会话以追加式文件保存在 Git 忽略目录 `data/recordings/`，由用户手动删除
 - 内置 3 个预设，分别展示行协议、TCP 回显和传感器数据
 
 ## 快速开始
@@ -366,9 +369,9 @@ codec:
 数据字典是跨设备的全局资源。设备配置只保存 `repeat.dictionary` 的 ID，不保存 entries；多个设备引用同一个 ID 时共享同一份码表。
 
 - **自定义字典**：所有字典都保存在本机 `data/dictionaries.json`，该目录由 Git 忽略，不会随仓库提交或构建分发。可在控制台左侧数据字典管理器中用可视化表格编辑，或切换到 JSON 源码视图；保存后对运行中的设备立即生效，无需重启。
-- **引用规则**：`repeat.dictionary` 必须是合法的全局 ID；服务端在保存设备、加载 `devices.json` 和校验预设时检查引用，缺失引用返回 422 或跳过该设备。
-- **删除保护**：仍被设备引用的字典不能删除；更新字典内容不会被阻止，下一帧编解码即使用新内容。ID 创建后不可修改，名称可以修改。
-- **自动迁移**：启动时会把旧 `codec.dictionaries` 转成全局字典并改写 repeat 引用，原 `devices.json` 备份为 `devices.json.pre-dictionary-migration-<timestamp>.bak`；设备 POST/PUT 也接受旧内联字典并自动迁移。`/api/config/validate` 不落盘迁移，旧内联配置会返回明确的 422 提示。
+- **引用规则**：`repeat.dictionary` 必须是合法的全局 ID；服务端在保存设备、加载 `devices.json` 和校验预设时检查引用，缺失引用返回 422 或跳过该设备。字典 ID 按大小写不敏感规则检查唯一性，引用仍须与定义中的大小写完全一致。
+- **删除保护**：有效设备和可识别出字典引用的无效设备记录都会阻止删除。无效设备不会在字典变更后自动重试；修复数据后需重启服务，设备才会重新加载。更新字典内容不会被阻止，下一帧编解码即使用新内容。ID 创建后不可修改，名称可以修改。
+- **自动迁移**：启动时会把旧 `codec.dictionaries` 转成全局字典并改写 repeat 引用，原 `devices.json` 备份为 `devices.json.pre-dictionary-migration-<timestamp>.bak`；设备 POST/PUT 也接受旧内联字典并自动迁移。迁移遇到已有同 ID 字典时只比较 entries，条目相同便保留现有字典名称和说明；条目不同则返回冲突。`/api/config/validate` 不落盘迁移，旧内联配置会返回明确的 422 提示。
 
 API：
 
@@ -456,6 +459,45 @@ match:
 - **模板补全**：规则 `set`、`send.fields` 和手动发送字段输入 `$`/`${` 时显示变量/函数建议；数字字段可用 `$` 或 `fx` 转为表达式，布尔/null 用 `fx`。源码模式没有补全。
 - **默认可视化**：每个编辑面分别记住上次选择（localStorage）；源码模式始终保留作为兜底。
 - **服务端校验**：源码切回可视化时会先调用 `POST /api/config/validate`，失败则留在源码模式并展示问题；可视化保存前同样经过服务端 Zod 校验。
+
+## 故障注入与录制回放
+
+每台设备的故障规则保存在设备配置中，运行时可在设备页的「故障注入」面板启停，也可以在设备运行时修改规则。服务重启或设备停止后，注入默认关闭。规则按列表顺序检查，每个 TCP 片段或 MQTT 消息只执行首条命中规则。
+
+```yaml
+faultInjection:
+  segmentSizeBytes: 256 # TCP 入站、出站分段长度；尾段空闲 5 ms 后处理
+  rules:
+    - id: delay-first-inbound
+      name: 延迟首个入站片段
+      enabled: true
+      direction: in # in、out 或 both
+      trigger:
+        type: sequence
+        mode: indices
+        indices: [1]
+      action:
+        type: delay
+        delayMs: 250
+    - id: drop-every-fifth-message
+      name: 每五条 MQTT 入站消息丢弃一条
+      direction: in
+      trigger:
+        type: sequence
+        mode: every
+        interval: 5
+      action:
+        type: drop
+```
+
+触发条件可选概率（`type: probability`，`percent: 0–100`）或序号（指定 `indices`、每 `interval` 次触发）。序号从 1 开始，在每条连接、每个方向分别计数。动作支持 `delay`、`drop`、`disconnect` 和 `corrupt`；损坏动作随机翻转一个 bit。TCP 按配置的字节长度切段，MQTT 按完整 PUBLISH 载荷处理。出站丢弃仍会进入协议现有的应用层 ACK 超时和重试流程。
+
+「录制回放」面板按设备单独开始和停止录制。会话保存收发流量、系统事件、解码结果及 MQTT 主题、QoS、retain 等元数据；时间轴支持播放、暂停、0.5× 到 4× 倍速、逐条步进和删除。回放只读取历史事件，不向设备发送数据，也不重新执行规则。会话和事件以 `data/recordings/<设备 ID>/<会话 ID>/` 下的 `session.json`、`events.jsonl` 持久化；目录已被 Git 忽略。应用异常退出后，已写入事件仍可读取，会话状态标记为未正常结束。磁盘写入失败会停止当前录制，并在面板中显示错误。
+
+服务端 API：
+
+- `GET /api/devices/:id/fault-injection` 读取规则和运行时启用状态；`PUT /api/devices/:id/fault-injection/rules` 热更新规则；`PATCH /api/devices/:id/fault-injection` 修改运行时启停状态。
+- `GET /api/devices/:id/recordings` 列出会话；`POST /api/devices/:id/recordings` 开始录制；`POST /api/devices/:id/recordings/:recordingId/stop` 停止；`GET /api/devices/:id/recordings/:recordingId/events?offset=0&limit=200` 分页读取；`DELETE /api/devices/:id/recordings/:recordingId` 删除已停止的会话。
 - **注释**：可视化编辑后重新生成 YAML 会丢失注释；配置本身由服务端以 JSON 持久化，YAML 注释也不会跨保存/重载保留。
 - **状态保存**：保存会替换整个状态对象，便于删除键；编辑期间规则产生的其他状态更新会被当前草稿覆盖。
 
@@ -521,19 +563,19 @@ pnpm start           # 生产模式（需要先 build）
 | 里程碑 | 内容 |
 | --- | --- |
 | **M2 传输扩展（进行中）** | TCP Server / TCP Client / MQTT Broker / MQTT Client（已支持）；UDP（下一阶段）、串口、HTTP server、WebSocket server、虚拟串口（Linux/macOS socat，Windows com0com） |
-| **M3 Modbus** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
-| **M4 可靠性** | JS script codec（worker + vm）、故障注入（延迟/丢包/断连/损坏）、透明代理、录制回放、虚拟时钟、多设备场景、CI |
+| **M3 Modbus（暂缓）** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
+| **M4 可靠性** | 故障注入和流量录制回看已支持；JS script codec（worker + vm）、透明代理、虚拟时钟、多设备场景、CI |
 | **更远** | CoAP、OPC UA、BACnet、BLE、pcapng 导出、可视化协议编辑器、Docker 发行 |
 
 ## 已知限制
 
 - TCP Client 为单目标。MQTT 仅支持 3.1.1 与 QoS 0/1；UDP、串口、HTTP/WebSocket 仍在路线图中。
-- 配置会持久化；**报文历史和运行时状态不会跨服务重启保留**。重启后状态回到配置中的 `state`。
+- 设备配置会持久化；实时流量历史和运行时状态不会跨服务重启保留，重启后状态回到配置中的 `state`。手动录制的会话保存在 `data/recordings/`，异常退出后以中断状态恢复读取。
 - 可视化编辑会重新生成 YAML，源码模式中的注释和原格式只在当前编辑会话、且未做可视化修改时保留；服务端本身只存 JSON。
 - 模板补全只在可视化模板输入中提供；YAML/JSON 源码模式没有补全。
 - TCP transport 不提供 TLS 或认证；MQTT Client 支持 mqtts 和 CA 文件，内嵌 Broker 支持 mqtts 与单组共享凭据。控制面默认只绑定 `127.0.0.1`，不要直接暴露到公网。
 - `raw` framing 在 TCP 上把每个数据块当作一帧，不保证与业务消息边界一致；带明确边界的协议请使用 length-prefix/delimiter/fixed。
-- JS script codec、录制回放、故障注入尚未实现；当前 UI 中的协议标签已标注“规划中”。
+- JS script codec、透明代理、虚拟时钟和多设备场景尚未实现；当前 UI 中的协议标签已标注“规划中”。
 - 所有数据字典均为本机自定义数据，保存在 Git 忽略的 `data/dictionaries.json`。被设备引用的字典不能删除。
 - 旧配置的内联字典在启动或设备 POST/PUT 时自动迁移；`/api/config/validate` 只预览，不落盘，因此源码模式粘贴旧内联字典会返回 422。
 
