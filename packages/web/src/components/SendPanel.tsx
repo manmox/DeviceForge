@@ -67,6 +67,10 @@ export function SendPanel() {
 
   const presentation = transportPresentation(device.config.transport.type);
   const connected = connections.length > 0;
+  const brokerReady =
+    device.config.transport.type === 'mqtt-broker' &&
+    device.status.transport.state === 'listening';
+  const canSend = connected || brokerReady;
   const paused = device.status.transport.state === 'disconnected';
   const failed = device.status.transport.state === 'error';
   const displayError = error ?? draft.error;
@@ -117,6 +121,8 @@ export function SendPanel() {
           <span className="text-[11px] text-accent-400">
             {connections.length} {presentation.connectionUnit}可用
           </span>
+        ) : brokerReady ? (
+          <span className="text-[11px] text-accent-400">Broker 已启动，可发布到默认主题</span>
         ) : (
           <span
             className={`text-[11px] ${
@@ -232,7 +238,7 @@ export function SendPanel() {
           <button
             className="btn btn-primary flex-1 sm:flex-none"
             onClick={() => void handleSend()}
-            disabled={!connected || sending}
+            disabled={!canSend || sending}
           >
             {sending ? '发送中…' : '发送'}
           </button>

@@ -1,10 +1,13 @@
 import type {
   DeviceConfig,
+  MqttBrokerTransport,
+  MqttClientTransport,
+  MqttSubscription,
   TcpClientTransport,
   TcpServerTransport,
   TransportConfig,
 } from '@deviceforge/core';
-import { Cable } from 'lucide-react';
+import { Cable, Plus, Trash2 } from 'lucide-react';
 import { changeTransportType } from '../../lib/config-defaults';
 import {
   transportEndpoint,
@@ -250,6 +253,224 @@ function TcpClientFields({
   );
 }
 
+const MQTT_QOS_OPTIONS: { value: '0' | '1'; label: string }[] = [
+  { value: '0', label: 'QoS 0 · 至多一次' },
+  { value: '1', label: 'QoS 1 · 至少一次' },
+];
+
+function MqttSubscriptionRow({
+  subscription,
+  index,
+  disabled,
+  onChange,
+  onDelete,
+}: {
+  subscription: MqttSubscription;
+  index: number;
+  disabled: boolean;
+  onChange: (next: MqttSubscription) => void;
+  onDelete: () => void;
+}) {
+  const topicError = useIssueText(`transport.subscriptions.${index}.topic`);
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
+      <FormField label={`主题过滤器 ${index + 1}`} error={topicError}>
+        <TextInput
+          value={subscription.topic}
+          onChange={(topic) => onChange({ ...subscription, topic })}
+          disabled={disabled}
+          monospace
+          placeholder="sensors/+/state"
+        />
+      </FormField>
+      <FormField label="订阅 QoS">
+        <SelectInput<'0' | '1'>
+          value={String(subscription.qos) as '0' | '1'}
+          options={MQTT_QOS_OPTIONS}
+          onChange={(qos) => onChange({ ...subscription, qos: qos === '0' ? 0 : 1 })}
+          disabled={disabled}
+          ariaLabel={`订阅 QoS ${index + 1}`}
+        />
+      </FormField>
+      <div className="flex items-end pb-0.5">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm text-rose-300"
+          onClick={onDelete}
+          disabled={disabled}
+          aria-label={`删除订阅 ${index + 1}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          删除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MqttClientFields({
+  transport,
+  onChange,
+  disabled,
+}: {
+  transport: MqttClientTransport;
+  onChange: (next: MqttClientTransport) => void;
+  disabled: boolean;
+}) {
+  function update(patch: Partial<MqttClientTransport>) {
+    onChange({ ...transport, ...patch });
+  }
+
+  return (
+    <>
+      <FormField label="Broker 地址" required error={useIssueText('transport.url')} hint="支持 mqtt:// 和 mqtts://；mqtts 默认校验证书。">
+        <TextInput
+          value={transport.url}
+          onChange={(url) => update({ url })}
+          disabled={disabled}
+          monospace
+          placeholder="mqtt://127.0.0.1:1883"
+        />
+      </FormField>
+      <FormField label="Client ID" hint="留空时使用设备 ID。">
+        <TextInput
+          value={transport.clientId ?? ''}
+          onChange={(clientId) => update({ clientId: clientId || undefined })}
+          disabled={disabled}
+          monospace
+          placeholder="my-device"
+        />
+      </FormField>
+      <FormField label="用户名" error={useIssueText('transport.username')}>
+        <TextInput
+          value={transport.username ?? ''}
+          onChange={(username) => update({ username: username || undefined })}
+          disabled={disabled}
+          placeholder="可选"
+        />
+      </FormField>
+      <FormField label="密码" error={useIssueText('transport.password')} hint="保存在本机设备配置文件中。">
+        <TextInput
+          type="password"
+          value={transport.password ?? ''}
+          onChange={(password) => update({ password: password || undefined })}
+          disabled={disabled}
+          placeholder="可选"
+        />
+      </FormField>
+      <FormField label="CA 证书文件" error={useIssueText('transport.caFile')} hint="仅 mqtts:// 使用；留空时使用系统 CA。">
+        <TextInput
+          value={transport.caFile ?? ''}
+          onChange={(caFile) => update({ caFile: caFile || undefined })}
+          disabled={disabled}
+          monospace
+          placeholder="/path/to/ca.pem"
+        />
+      </FormField>
+      <FormField label="默认发布主题" required error={useIssueText('transport.publishTopic')}>
+        <TextInput
+          value={transport.publishTopic}
+          onChange={(publishTopic) => update({ publishTopic })}
+          disabled={disabled}
+          monospace
+          placeholder="deviceforge/device/up"
+        />
+      </FormField>
+      <FormField label="发布 QoS" error={useIssueText('transport.publishQos')}>
+        <SelectInput<'0' | '1'>
+          value={String(transport.publishQos) as '0' | '1'}
+          options={MQTT_QOS_OPTIONS}
+          onChange={(publishQos) => update({ publishQos: publishQos === '0' ? 0 : 1 })}
+          disabled={disabled}
+          ariaLabel="MQTT 发布 QoS"
+        />
+      </FormField>
+
+      <div className="sm:col-span-2 rounded-lg border border-white/10 bg-ink-900/30 p-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-medium text-mist-300">订阅主题</div>
+            <p className="mt-0.5 text-[10.5px] text-mist-500">每条 PUBLISH 载荷作为一帧进入 codec。支持 + 和 #。</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => update({ subscriptions: [...transport.subscriptions, { topic: '', qos: 0 }] })}
+            disabled={disabled}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加订阅
+          </button>
+        </div>
+        {transport.subscriptions.length === 0 ? (
+          <p className="mt-2 text-[10.5px] text-mist-600">暂无订阅；设备仍可向默认主题发布消息。</p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {transport.subscriptions.map((subscription, index) => (
+              <MqttSubscriptionRow
+                key={index}
+                subscription={subscription}
+                index={index}
+                disabled={disabled}
+                onChange={(next) => update({ subscriptions: transport.subscriptions.map((item, itemIndex) => itemIndex === index ? next : item) })}
+                onDelete={() => update({ subscriptions: transport.subscriptions.filter((_, itemIndex) => itemIndex !== index) })}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function MqttBrokerFields({
+  transport,
+  onChange,
+  disabled,
+}: {
+  transport: MqttBrokerTransport;
+  onChange: (next: MqttBrokerTransport) => void;
+  disabled: boolean;
+}) {
+  function update(patch: Partial<MqttBrokerTransport>) {
+    onChange({ ...transport, ...patch });
+  }
+
+  return (
+    <>
+      <FormField label="监听地址" required error={useIssueText('transport.host')} hint="默认只监听本机；如需局域网访问可改为 0.0.0.0。">
+        <TextInput value={transport.host} onChange={(host) => update({ host })} disabled={disabled} monospace placeholder="127.0.0.1" />
+      </FormField>
+      <FormField label="端口" required error={useIssueText('transport.port')}>
+        <NumberInput value={transport.port} onChange={(port) => update({ port: port ?? 1883 })} min={0} max={65535} step={1} disabled={disabled} ariaLabel="MQTT Broker 端口" />
+      </FormField>
+      <FormField label="用户名" error={useIssueText('transport.username')}>
+        <TextInput value={transport.username ?? ''} onChange={(username) => update({ username: username || undefined })} disabled={disabled} placeholder="可选，所有客户端共用" />
+      </FormField>
+      <FormField label="密码" error={useIssueText('transport.password')} hint="保存在本机设备配置文件中。">
+        <TextInput type="password" value={transport.password ?? ''} onChange={(password) => update({ password: password || undefined })} disabled={disabled} placeholder="可选，所有客户端共用" />
+      </FormField>
+      <FormField label="TLS 证书文件" error={useIssueText('transport.certFile')} hint="填写后启用 mqtts://；须与私钥同时配置。">
+        <TextInput value={transport.certFile ?? ''} onChange={(certFile) => update({ certFile: certFile || undefined })} disabled={disabled} monospace placeholder="/path/to/server.crt" />
+      </FormField>
+      <FormField label="TLS 私钥文件" error={useIssueText('transport.keyFile')}>
+        <TextInput value={transport.keyFile ?? ''} onChange={(keyFile) => update({ keyFile: keyFile || undefined })} disabled={disabled} monospace placeholder="/path/to/server.key" />
+      </FormField>
+      <FormField label="默认发布主题" required error={useIssueText('transport.publishTopic')}>
+        <TextInput value={transport.publishTopic} onChange={(publishTopic) => update({ publishTopic })} disabled={disabled} monospace placeholder="deviceforge/device/down" />
+      </FormField>
+      <FormField label="发布 QoS" error={useIssueText('transport.publishQos')}>
+        <SelectInput<'0' | '1'> value={String(transport.publishQos) as '0' | '1'} options={MQTT_QOS_OPTIONS} onChange={(publishQos) => update({ publishQos: publishQos === '0' ? 0 : 1 })} disabled={disabled} ariaLabel="MQTT Broker 发布 QoS" />
+      </FormField>
+      {transport.host === '0.0.0.0' && (
+        <div className="sm:col-span-2">
+          <InlineWarning>0.0.0.0 会把 Broker 暴露到局域网；确认网络环境可信后再使用。</InlineWarning>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function TransportSection({
   config,
   onChange,
@@ -271,7 +492,7 @@ export function TransportSection({
   return (
     <FormSection
       title="传输"
-      description="设备监听或主动连接的网络端点。TCP Server 等待上位机接入，TCP Client 主动连接上游。"
+      description="选择 TCP 流连接，或使用 MQTT 发布和订阅主题。"
       icon={<Cable className="h-4 w-4 text-sky-400" />}
       path="transport"
     >
@@ -295,17 +516,13 @@ export function TransportSection({
         <div className="hidden sm:block" />
 
         {config.transport.type === 'tcp-server' ? (
-          <TcpServerFields
-            transport={config.transport}
-            onChange={(next) => changeTransport(next)}
-            disabled={disabled}
-          />
+          <TcpServerFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
+        ) : config.transport.type === 'tcp-client' ? (
+          <TcpClientFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
+        ) : config.transport.type === 'mqtt-client' ? (
+          <MqttClientFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
         ) : (
-          <TcpClientFields
-            transport={config.transport}
-            onChange={(next) => changeTransport(next)}
-            disabled={disabled}
-          />
+          <MqttBrokerFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
         )}
       </div>
     </FormSection>

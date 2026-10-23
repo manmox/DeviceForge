@@ -10,6 +10,8 @@ import type {
   FramingConfig,
   OutgoingMessage,
   Rule,
+  MqttBrokerTransport,
+  MqttClientTransport,
   TcpClientTransport,
   TcpServerTransport,
   TransportConfig,
@@ -95,6 +97,8 @@ export function uniqueDeviceId(existing: Iterable<string>, base = 'my-device'): 
 
 export function defaultTransport(type: 'tcp-server'): TcpServerTransport;
 export function defaultTransport(type: 'tcp-client'): TcpClientTransport;
+export function defaultTransport(type: 'mqtt-client'): MqttClientTransport;
+export function defaultTransport(type: 'mqtt-broker'): MqttBrokerTransport;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig {
   if (type === 'tcp-client') {
@@ -106,6 +110,24 @@ export function defaultTransport(type: TransportConfig['type']): TransportConfig
       reconnect: { ...DEFAULT_RECONNECT_CONFIG },
     };
   }
+  if (type === 'mqtt-client') {
+    return {
+      type: 'mqtt-client',
+      url: 'mqtt://127.0.0.1:1883',
+      subscriptions: [],
+      publishTopic: 'deviceforge/device/up',
+      publishQos: 0,
+    };
+  }
+  if (type === 'mqtt-broker') {
+    return {
+      type: 'mqtt-broker',
+      host: '127.0.0.1',
+      port: 1883,
+      publishTopic: 'deviceforge/device/down',
+      publishQos: 0,
+    };
+  }
   return { type: 'tcp-server', host: '127.0.0.1', port: 19010 };
 }
 
@@ -115,19 +137,23 @@ export function changeTransportType(
 ): TransportConfig {
   if (current.type === type) return current;
 
-  const host = current.host || '127.0.0.1';
+  const host = 'host' in current ? current.host || '127.0.0.1' : '127.0.0.1';
+  const currentPort = 'port' in current ? current.port : 1883;
+  if (type === 'mqtt-client' || type === 'mqtt-broker') {
+    return defaultTransport(type);
+  }
   if (type === 'tcp-client') {
     const defaults = defaultTransport('tcp-client');
     return {
       ...defaults,
       host,
       // 监听端口 0 表示自动分配，切到 client 后没有意义。
-      port: current.port > 0 ? current.port : defaults.port,
+      port: currentPort > 0 ? currentPort : defaults.port,
     };
   }
 
   const defaults = defaultTransport('tcp-server');
-  return { ...defaults, host, port: current.port };
+  return { ...defaults, host, port: currentPort };
 }
 
 export function createBlankConfig(): DeviceConfig {

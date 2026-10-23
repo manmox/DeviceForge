@@ -25,7 +25,7 @@ import {
   withRuleTrigger,
   type RuleTrigger,
 } from '../../lib/rule-shape';
-import { useIssues } from '../form/ConfigIssuesContext';
+import { useIssueText, useIssues } from '../form/ConfigIssuesContext';
 import {
   FormField,
   IconButton,
@@ -55,6 +55,8 @@ export function RuleCard({
   index,
   total,
   codec,
+  mqttEnabled = false,
+  mqttClientId = false,
   state,
   deviceInfo,
   onChange,
@@ -69,6 +71,8 @@ export function RuleCard({
   index: number;
   total: number;
   codec: CodecConfig;
+  mqttEnabled?: boolean;
+  mqttClientId?: boolean;
   state: Record<string, unknown>;
   deviceInfo?: DeviceInfo;
   onChange: (next: Rule) => void;
@@ -80,6 +84,8 @@ export function RuleCard({
   disabled?: boolean;
 }) {
   const issues = useIssues(`rules.${index}`);
+  const topicFilterIssue = useIssueText(`rules.${index}.topicFilter`);
+  const publishTopicIssue = useIssueText(`rules.${index}.publishTopic`);
   const dictionaries = useDictionaryRegistry();
   const bodyId = useId();
   const trigger = ruleTrigger(rule);
@@ -89,23 +95,27 @@ export function RuleCard({
   );
   const setCompletion = useMemo(
     () => ({
-      roots: templateRootsFor('rule-set', trigger),
+      roots: templateRootsFor('rule-set', trigger, mqttEnabled),
       codec,
       dictionaries,
       state,
       deviceInfo,
+      mqtt: mqttEnabled,
+      mqttClientId,
     }),
-    [trigger, codec, dictionaries, state, deviceInfo],
+    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId],
   );
   const sendCompletion = useMemo(
     () => ({
-      roots: templateRootsFor('rule-send', trigger),
+      roots: templateRootsFor('rule-send', trigger, mqttEnabled),
       codec,
       dictionaries,
       state,
       deviceInfo,
+      mqtt: mqttEnabled,
+      mqttClientId,
     }),
-    [trigger, codec, dictionaries, state, deviceInfo],
+    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId],
   );
   const summaryParts = ruleSummaryParts(rule);
   if (summaryParts[0] === RULE_TRIGGER_LABELS[trigger]) summaryParts.shift();
@@ -136,7 +146,9 @@ export function RuleCard({
     onToggle();
   }
 
-  function unset(key: 'id' | 'name' | 'set' | 'send' | 'match'): Rule {
+  function unset(
+    key: 'id' | 'name' | 'set' | 'send' | 'match' | 'topicFilter' | 'publishTopic',
+  ): Rule {
     const next = { ...rule };
     delete next[key];
     return next;
@@ -289,7 +301,7 @@ export function RuleCard({
                     ariaLabel="抖动"
                   />
                 </FormField>
-                <FormField label="发送目标" hint="周期规则无触发连接，可选择全部或最近连接。">
+                {!mqttEnabled && <FormField label="发送目标" hint="周期规则无触发连接，可选择全部或最近连接。">
                   <SelectInput<'all' | 'last'>
                     value={rule.target}
                     options={[
@@ -300,7 +312,7 @@ export function RuleCard({
                     disabled={disabled}
                     ariaLabel="发送目标"
                   />
-                </FormField>
+                </FormField>}
               </>
             )}
           </div>
@@ -317,6 +329,27 @@ export function RuleCard({
                 disabled={disabled}
                 path={`rules.${index}.match`}
               />
+              {mqttEnabled && (
+                <div className="mt-2">
+                  <FormField
+                    label="主题过滤器（可选）"
+                    error={topicFilterIssue}
+                    hint="支持 + 匹配单层、# 匹配末尾多层；留空时匹配所有主题。"
+                  >
+                    <TextInput
+                      value={rule.topicFilter ?? ''}
+                      onChange={(topicFilter) =>
+                        topicFilter.trim() === ''
+                          ? onChange(unset('topicFilter'))
+                          : patch({ topicFilter })
+                      }
+                      disabled={disabled}
+                      monospace
+                      placeholder="sensors/+/state"
+                    />
+                  </FormField>
+                </div>
+              )}
             </div>
           )}
 
@@ -367,6 +400,25 @@ export function RuleCard({
             />
             {sendEnabled && (
               <div className="mt-2 space-y-2">
+                {mqttEnabled && (
+                  <FormField
+                    label="发布主题覆盖（可选）"
+                    error={publishTopicIssue}
+                    hint="留空时使用传输默认主题；帧规则可使用 $mqtt.topic 等入站元数据。"
+                  >
+                    <TextInput
+                      value={rule.publishTopic ?? ''}
+                      onChange={(publishTopic) =>
+                        publishTopic.trim() === ''
+                          ? onChange(unset('publishTopic'))
+                          : patch({ publishTopic })
+                      }
+                      disabled={disabled}
+                      monospace
+                      placeholder="deviceforge/device/down"
+                    />
+                  </FormField>
+                )}
                 {messages.length === 0 && (
                   <p className="text-[10.5px] text-mist-500">当前 send 是空数组，不会发送任何消息。</p>
                 )}
@@ -433,7 +485,7 @@ export function RuleCard({
             <div className="rounded-lg border border-white/5 bg-white/[0.015] p-2.5">
               <SwitchRow
                 label="发送后断开连接"
-                hint="仅在连接或收到帧触发时有效；TCP Client 会暂停自动重连，重启设备后恢复。"
+                hint="仅在连接或收到帧触发时有效；TCP Client 与 MQTT Client 会暂停自动重连，重启设备后恢复。"
                 checked={rule.disconnect}
                 onChange={(disconnect) => patch({ disconnect })}
                 disabled={disabled}

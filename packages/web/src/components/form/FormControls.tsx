@@ -41,6 +41,7 @@ export function TextInput({
   list,
   onFocus,
   onBlur,
+  type = 'text',
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -52,9 +53,11 @@ export function TextInput({
   list?: string;
   onFocus?: () => void;
   onBlur?: () => void;
+  type?: 'text' | 'password';
 }) {
   return (
     <input
+      type={type}
       className={`field h-8 py-0 text-xs ${monospace ? 'font-mono' : ''} ${className}`}
       value={value}
       onChange={(event) => onChange(event.target.value)}

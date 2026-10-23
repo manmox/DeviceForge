@@ -8,15 +8,15 @@ import {
   Terminal,
   Waypoints,
 } from 'lucide-react';
-import { transportPresentation } from '../lib/transport-presentation';
+import { transportEndpoint, transportPresentation } from '../lib/transport-presentation';
 import { useAppStore } from '../store';
 
 const FEATURES = [
   {
     icon: Cable,
-    title: '监听或主动连接',
+    title: 'TCP 与 MQTT 接入',
     description:
-      '设备可以监听本地端口等待上位机接入，也可以主动连接上游网关；不用改网络拓扑，也不用等内网穿透恢复。',
+      '设备可以监听 TCP 端口、主动连接 TCP 上游、连接 MQTT Broker，或在本机启动 Broker。',
   },
   {
     icon: Waypoints,
@@ -87,15 +87,15 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
           <span className="chip border-accent-500/20 text-accent-300">
             <Terminal className="h-3 w-3" /> TCP Server / Client（已支持）
           </span>
-          <span className="chip opacity-70">
-            <Radio className="h-3 w-3 text-sky-400" /> MQTT · 规划中
+          <span className="chip border-sky-500/20 text-sky-300">
+            <Radio className="h-3 w-3 text-sky-400" /> MQTT Client / Broker（已支持）
           </span>
           <span className="chip opacity-70">
             <Cpu className="h-3 w-3 text-violet-400" /> Modbus · 规划中
           </span>
           <span className="chip opacity-70">HTTP / WebSocket · 规划中</span>
           <span className="text-mist-500">
-            v0.1 先交付 TCP 自定义帧核心 · 支持监听与主动连接
+            TCP 与 MQTT 传输 · 自定义帧与主题规则
           </span>
         </div>
 
@@ -133,7 +133,7 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
                     <span className="chip font-mono text-[10px]">
                       {transportPresentation(preset.config.transport.type).kindLabel}
                       {' :'}
-                      {preset.config.transport.port}
+                      {transportEndpoint(preset.config.transport)}
                     </span>
                     <ArrowRight className="h-4 w-4 text-mist-500 transition-transform group-hover:translate-x-0.5 group-hover:text-accent-400" />
                   </div>

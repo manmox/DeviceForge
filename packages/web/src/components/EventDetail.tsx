@@ -84,6 +84,34 @@ export function EventDetail({
           </div>
         </div>
 
+        {event.mqtt && (
+          <section className="mt-3 rounded-lg border border-white/10 bg-ink-950/30 p-2.5">
+            <h4 className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">
+              MQTT 消息
+            </h4>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+              <div className="col-span-2 min-w-0">
+                <div className="text-mist-500">主题</div>
+                <div className="mt-0.5 break-all font-mono text-mist-200">{event.mqtt.topic}</div>
+              </div>
+              <div>
+                <div className="text-mist-500">QoS</div>
+                <div className="mt-0.5 font-mono text-mist-300">{event.mqtt.qos}</div>
+              </div>
+              <div>
+                <div className="text-mist-500">retain</div>
+                <div className="mt-0.5 font-mono text-mist-300">{String(event.mqtt.retain)}</div>
+              </div>
+              {event.mqtt.clientId && (
+                <div className="col-span-2 min-w-0">
+                  <div className="text-mist-500">发布者 Client ID</div>
+                  <div className="mt-0.5 break-all font-mono text-mist-300">{event.mqtt.clientId}</div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         {event.error && (
           <div className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/[0.07] px-2.5 py-2 text-[11px] leading-5 text-rose-200">
             {event.error}

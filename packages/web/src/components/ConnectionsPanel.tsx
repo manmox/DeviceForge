@@ -83,9 +83,13 @@ export function ConnectionsPanel() {
                   <tr key={connection.id} className="hover:bg-white/[0.02]">
                     <td className="px-4 py-3">
                       <div className="font-mono text-[12px] text-mist-200">
-                        {connection.remoteAddress ?? 'unknown'}:
-                        {connection.remotePort ?? '?'}
+                        {connection.clientId ?? `${connection.remoteAddress ?? 'unknown'}:${connection.remotePort ?? '?'}`}
                       </div>
+                      {connection.clientId && (
+                        <div className="mt-0.5 text-[10px] text-mist-500">
+                          {connection.remoteAddress ?? 'unknown'}:{connection.remotePort ?? '?'}
+                        </div>
+                      )}
                       <div
                         className="mt-0.5 font-mono text-[10px] text-mist-600"
                         title={connection.id}

@@ -57,6 +57,24 @@ export function FramingSection({
   const maxFrameLengthError = useIssueText('framing.maxFrameLength');
   const fixedLengthError = useIssueText('framing.length');
 
+  if (
+    config.transport.type === 'mqtt-client' ||
+    config.transport.type === 'mqtt-broker'
+  ) {
+    return (
+      <FormSection
+        title="分帧"
+        description="MQTT 已提供明确的消息边界。"
+        icon={<Ruler className="h-4 w-4 text-violet-400" />}
+        path="framing"
+      >
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 text-xs leading-5 text-mist-400">
+          每条 PUBLISH 载荷直接作为一帧交给 codec；TCP 分帧参数在此传输方式下不生效，切回 TCP 后会恢复原配置。
+        </div>
+      </FormSection>
+    );
+  }
+
   function setFraming(next: FramingConfig) {
     onChange({ ...config, framing: next });
   }

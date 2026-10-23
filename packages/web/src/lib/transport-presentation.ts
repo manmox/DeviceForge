@@ -37,6 +37,16 @@ export const TRANSPORT_OPTIONS: {
     label: 'TCP Client · 主动连接',
     description: '设备启动后主动连接一个上游服务器。',
   },
+  {
+    value: 'mqtt-client',
+    label: 'MQTT Client · 发布订阅',
+    description: '连接外部 MQTT Broker，按主题订阅和发布消息。',
+  },
+  {
+    value: 'mqtt-broker',
+    label: 'MQTT Broker · 本机服务',
+    description: '在本机启动 MQTT Broker，供 MQTT 客户端连接。',
+  },
 ];
 
 const PRESENTATIONS: Record<TransportConfig['type'], TransportPresentation> = {
@@ -80,6 +90,44 @@ const PRESENTATIONS: Record<TransportConfig['type'], TransportPresentation> = {
     disconnectHint: '断开后暂停自动重连；重启设备可恢复连接。',
     isOutbound: true,
   },
+  'mqtt-client': {
+    kindLabel: 'MQTT Client',
+    modeLabel: '发布 / 订阅',
+    endpointLabel: 'Broker 地址',
+    endpointShortLabel: 'Broker',
+    peerLabel: 'MQTT Broker',
+    connectionTitle: 'Broker 连接',
+    connectionStatLabel: 'Broker 连接',
+    connectionUnit: '条 Broker 连接',
+    sendTargetLabel: '→ 默认发布主题',
+    waitingLabel: '等待连接 MQTT Broker',
+    pausedLabel: '已手动断开，重启设备后重新连接',
+    emptyConnectionText: (endpoint) =>
+      `设备启动后会连接 ${endpoint}，随后订阅配置中的主题并发布消息。`,
+    trafficEmptyHint: '连接 MQTT Broker 后，收发消息会实时出现在这里。',
+    copyEndpointTitle: '复制 Broker 地址',
+    disconnectHint: '断开后停止自动重连；重启设备可恢复连接。',
+    isOutbound: true,
+  },
+  'mqtt-broker': {
+    kindLabel: 'MQTT Broker',
+    modeLabel: '本机服务',
+    endpointLabel: '监听地址',
+    endpointShortLabel: '监听',
+    peerLabel: 'MQTT 客户端',
+    connectionTitle: '客户端连接',
+    connectionStatLabel: '客户端连接',
+    connectionUnit: '个客户端',
+    sendTargetLabel: '→ 发布到主题',
+    waitingLabel: '等待 MQTT 客户端连接',
+    pausedLabel: 'Broker 已停止',
+    emptyConnectionText: (endpoint) =>
+      `让 MQTT 客户端连接 ${endpoint}；收到的 PUBLISH 载荷会进入设备编解码和规则流程。`,
+    trafficEmptyHint: '启动 Broker 并连接 MQTT 客户端后，消息会实时出现在这里。',
+    copyEndpointTitle: '复制 Broker 监听地址',
+    disconnectHint: '断开该 MQTT 客户端。',
+    isOutbound: false,
+  },
 };
 
 export function transportPresentation(
@@ -105,6 +153,18 @@ export function transportEndpoint(
 ): string {
   const live = endpoints?.find((endpoint) => endpoint.length > 0);
   if (live) return live;
+  if (config.type === 'mqtt-client') {
+    try {
+      const url = new URL(config.url);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return config.url;
+    }
+  }
+  if (config.type === 'mqtt-broker') {
+    const scheme = config.certFile && config.keyFile ? 'mqtts' : 'mqtt';
+    return `${scheme}://${formatHostPort(config.host, config.port)}`;
+  }
   if (config.type === 'tcp-server' && config.port === 0) {
     return `${formatHost(config.host)}:自动分配`;
   }

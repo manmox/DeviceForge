@@ -52,6 +52,20 @@ describe('transport defaults', () => {
         maxDelayMs: 10_000,
       },
     });
+    expect(defaultTransport('mqtt-client')).toEqual({
+      type: 'mqtt-client',
+      url: 'mqtt://127.0.0.1:1883',
+      subscriptions: [],
+      publishTopic: 'deviceforge/device/up',
+      publishQos: 0,
+    });
+    expect(defaultTransport('mqtt-broker')).toEqual({
+      type: 'mqtt-broker',
+      host: '127.0.0.1',
+      port: 1883,
+      publishTopic: 'deviceforge/device/down',
+      publishQos: 0,
+    });
   });
 
   it('changes transport type while preserving compatible host and port', () => {
@@ -74,6 +88,10 @@ describe('transport defaults', () => {
     });
 
     expect(changeTransportType(server, 'tcp-server')).toBe(server);
+    expect(changeTransportType(server, 'mqtt-client')).toMatchObject({
+      type: 'mqtt-client',
+      url: 'mqtt://127.0.0.1:1883',
+    });
   });
 
   it('replaces the server auto-assigned port when switching to a client', () => {

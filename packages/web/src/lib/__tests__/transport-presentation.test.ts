@@ -55,6 +55,24 @@ describe('transportPresentation', () => {
       ),
     ).toBe('127.0.0.1:19002');
     expect(transportEndpoint(client)).toBe('127.0.0.1:9000');
+    expect(
+      transportEndpoint({
+        type: 'mqtt-client',
+        url: 'mqtts://broker.example.com:8883',
+        subscriptions: [],
+        publishTopic: 'device/up',
+        publishQos: 0,
+      }),
+    ).toBe('mqtts://broker.example.com:8883');
+    expect(
+      transportEndpoint({
+        type: 'mqtt-broker',
+        host: '127.0.0.1',
+        port: 1883,
+        publishTopic: 'device/down',
+        publishQos: 1,
+      }),
+    ).toBe('mqtt://127.0.0.1:1883');
     expect(formatHostPort('::1', 9000)).toBe('[::1]:9000');
     expect(formatHostPort('[::1]', 9000)).toBe('[::1]:9000');
   });

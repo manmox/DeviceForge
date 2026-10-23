@@ -18,6 +18,7 @@ export type TemplateRoot =
   | 'counter'
   | 'conn'
   | 'device'
+  | 'mqtt'
   | 'now';
 
 export type TemplateSuggestionKind =
@@ -35,6 +36,8 @@ export interface TemplateCompletionContext {
   dictionaries?: DictionaryRegistry;
   state?: Record<string, unknown>;
   deviceInfo?: DeviceInfo;
+  mqtt?: boolean;
+  mqttClientId?: boolean;
   counters?: readonly ('tx' | 'rx')[];
   /** 默认值 4。 */
   maxStateDepth?: number;
@@ -107,15 +110,18 @@ const ROOT_ORDER: TemplateRoot[] = [
   'counter',
   'conn',
   'device',
+  'mqtt',
   'now',
 ];
 
 export function templateRootsFor(
   scope: TemplateScope,
   trigger?: RuleTrigger,
+  mqttEnabled = false,
 ): TemplateRoot[] {
   const roots: TemplateRoot[] = [];
   if (scope !== 'manual-send' && trigger === 'frame') roots.push('req');
+  if (mqttEnabled && scope !== 'manual-send' && trigger === 'frame') roots.push('mqtt');
   roots.push('state', 'counter');
   if (
     scope === 'manual-send' ||
@@ -661,6 +667,8 @@ function rootHasChildren(
       return true;
     case 'device':
       return deviceCandidates(context).length > 0;
+    case 'mqtt':
+      return context.mqtt === true;
     case 'now':
       return false;
   }
@@ -675,6 +683,7 @@ const ROOT_DESCRIPTIONS: Record<
   counter: { description: '收发帧计数', detail: 'tx / rx' },
   conn: { description: '当前连接信息', detail: '发送目标连接' },
   device: { description: '设备信息', detail: '型号、序列号、TNS/IMEI 等' },
+  mqtt: { description: '触发消息的 MQTT 元数据', detail: '主题、QoS、retain、Client ID' },
   now: { description: '当前时间戳（毫秒）' },
 };
 
@@ -739,6 +748,11 @@ function memberCandidates(
   if (root === 'device') {
     return token.parentSegments.length === 1 ? deviceCandidates(context) : [];
   }
+  if (root === 'mqtt') {
+    return token.parentSegments.length === 1 && context.mqtt
+      ? mqttCandidates(context.mqttClientId === true)
+      : [];
+  }
   if (root === 'now') return [];
 
   const maxDepth = context.maxStateDepth ?? DEFAULT_MAX_STATE_DEPTH;
@@ -750,6 +764,50 @@ function memberCandidates(
     maxDepth,
     context.maxItems ?? DEFAULT_MAX_ITEMS,
   );
+}
+
+function mqttCandidates(includeClientId: boolean): Candidate[] {
+  const candidates: Candidate[] = [
+    {
+      id: 'mqtt:topic',
+      kind: 'field',
+      name: 'topic',
+      fullPath: 'mqtt.topic',
+      description: '入站消息主题',
+      detail: '文本',
+      hasChildren: false,
+    },
+    {
+      id: 'mqtt:qos',
+      kind: 'field',
+      name: 'qos',
+      fullPath: 'mqtt.qos',
+      description: '入站消息 QoS',
+      detail: '0 或 1',
+      hasChildren: false,
+    },
+    {
+      id: 'mqtt:retain',
+      kind: 'field',
+      name: 'retain',
+      fullPath: 'mqtt.retain',
+      description: '入站消息 retain 标记',
+      detail: '布尔',
+      hasChildren: false,
+    },
+  ];
+  if (includeClientId) {
+    candidates.push({
+      id: 'mqtt:clientId',
+      kind: 'field',
+      name: 'clientId',
+      fullPath: 'mqtt.clientId',
+      description: '发布者 Client ID，仅 Broker 模式可用',
+      detail: '文本',
+      hasChildren: false,
+    });
+  }
+  return candidates;
 }
 
 function toSuggestion(

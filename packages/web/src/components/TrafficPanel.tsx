@@ -59,11 +59,11 @@ function summaryOf(event: TrafficEvent): string {
     return event.note ?? event.error ?? '系统事件';
   }
   const decoded = summarizeDecoded(event.decoded);
-  if (decoded) return decoded;
-  if (event.data) {
-    return event.data.length > 96 ? `${event.data.slice(0, 96)}…` : event.data;
-  }
-  return '—';
+  const payload = decoded || (event.data
+    ? event.data.length > 96 ? `${event.data.slice(0, 96)}…` : event.data
+    : '—');
+  if (!event.mqtt) return payload;
+  return `${event.mqtt.topic} · QoS ${event.mqtt.qos} · ${payload}`;
 }
 
 export function TrafficPanel() {
@@ -86,6 +86,8 @@ export function TrafficPanel() {
       const haystack = [
         event.data,
         event.rule,
+        event.mqtt?.topic,
+        event.mqtt?.clientId,
         event.note,
         event.error,
         event.decoded ? JSON.stringify(event.decoded) : '',

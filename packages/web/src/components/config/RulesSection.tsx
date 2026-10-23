@@ -174,6 +174,11 @@ export function RulesSection({
                 index={index}
                 total={rules.length}
                 codec={config.codec}
+                mqttEnabled={
+                  config.transport.type === 'mqtt-client' ||
+                  config.transport.type === 'mqtt-broker'
+                }
+                mqttClientId={config.transport.type === 'mqtt-broker'}
                 state={config.state}
                 deviceInfo={config.deviceInfo}
                 onChange={(next) => updateRule(index, next)}

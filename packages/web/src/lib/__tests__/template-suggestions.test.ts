@@ -131,6 +131,8 @@ describe('templateRootsFor', () => {
       'device',
       'now',
     ]);
+    expect(templateRootsFor('rule-set', 'frame', true)).toContain('mqtt');
+    expect(templateRootsFor('rule-set', 'start', true)).not.toContain('mqtt');
     expect(templateRootsFor('rule-set', 'interval')).toEqual([
       'state',
       'counter',
@@ -246,6 +248,24 @@ describe('template suggestion catalog', () => {
         'and(a, b, ...)',
       ]),
     );
+  });
+
+  it('offers MQTT metadata only for frame rules using MQTT transport', () => {
+    const mqttContext: TemplateCompletionContext = {
+      ...context,
+      mqtt: true,
+      roots: templateRootsFor('rule-send', 'frame', true),
+    };
+    expect(labels('$mqtt.', mqttContext)).toEqual(
+      expect.arrayContaining([
+        '$mqtt.topic',
+        '$mqtt.qos',
+        '$mqtt.retain',
+      ]),
+    );
+    expect(labels('$mqtt.', { ...mqttContext, mqttClientId: true })).toContain('$mqtt.clientId');
+    expect(labels('$mqtt.', mqttContext)).not.toContain('$mqtt.clientId');
+    expect(templateRootsFor('manual-send', undefined, true)).not.toContain('mqtt');
   });
 
   it('lists codec fields and checksum metadata for req', () => {
