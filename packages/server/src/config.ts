@@ -20,3 +20,7 @@ export const control = {
   host: process.env.DEVICEFORGE_HOST ?? '127.0.0.1',
   port: Number(process.env.DEVICEFORGE_PORT ?? 7321),
 };
+
+export const mcp = {
+  port: Number(process.env.DEVICEFORGE_MCP_PORT ?? 7322),
+};

@@ -5,11 +5,9 @@ import {
   type DeviceConfig,
 } from '@deviceforge/core';
 import type { z } from 'zod';
+import type { ValidationIssue } from '../application/contracts';
 
-export interface ValidationIssue {
-  path: string;
-  message: string;
-}
+export type { ValidationIssue } from '../application/contracts';
 
 export function issuesOf(error: z.ZodError): ValidationIssue[] {
   return error.issues.map((issue) => ({

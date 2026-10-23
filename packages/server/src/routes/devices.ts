@@ -1,15 +1,11 @@
 import {
-  DeviceConfigSchema,
   FaultInjectionConfigSchema,
   OutgoingMessageSchema,
-  findMissingDictionaryReferences,
-  migrateInlineTextDictionaries,
 } from '@deviceforge/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { issuesOf } from '../lib/device-validation';
+import type { DeviceConfigurationApplication } from '../application/contracts';
 import type { RuntimeManager } from '../runtime-manager';
-import type { DictionaryStore } from '../store/dictionary-store';
 import type { RecordingStore } from '../store/recording-store';
 
 const IdParamsSchema = z.object({
@@ -53,7 +49,7 @@ function errorMessage(error: unknown): string {
 export async function registerDeviceRoutes(
   app: FastifyInstance,
   manager: RuntimeManager,
-  dictionaries: DictionaryStore,
+  deviceConfigs: Pick<DeviceConfigurationApplication, 'create' | 'update'>,
   recordings: RecordingStore,
 ): Promise<void> {
   app.get('/api/devices', async () => {
@@ -74,135 +70,28 @@ export async function registerDeviceRoutes(
   });
 
   app.post('/api/devices', async (request, reply) => {
-    const migration = migrateInlineTextDictionaries(
-      request.body,
-      dictionaries.list(),
-    );
-    if (migration.errors.length > 0) {
-      return reply.code(422).send({
-        error: '内联字典迁移失败',
-        issues: migration.errors.map((error) => ({
-          path: `codec.dictionaries.${error.dictionary}`,
-          message: error.message,
-        })),
+    const result = deviceConfigs.create(request.body);
+    if (!result.ok) {
+      return reply.code(result.statusCode).send({
+        error: result.error,
+        ...(result.issues ? { issues: result.issues } : {}),
+        ...(result.message ? { message: result.message } : {}),
       });
     }
-
-    const parsed = DeviceConfigSchema.safeParse(migration.config);
-    if (!parsed.success) {
-      return reply.code(422).send({ error: '配置校验失败', issues: issuesOf(parsed.error) });
-    }
-    const config = parsed.data;
-    if (manager.hasStoredId(config.id)) {
-      return reply.code(409).send({ error: `设备 ${config.id} 已存在` });
-    }
-
-    const available = new Set([
-      ...dictionaries.list().map((item) => item.id),
-      ...migration.definitions.map((item) => item.id),
-    ]);
-    const missing = findMissingDictionaryReferences(
-      config,
-      (id) => available.has(id),
-    );
-    if (missing.length > 0) {
-      return reply.code(422).send({
-        error: '配置校验失败',
-        issues: missing.map((reference) => ({
-          path: reference.path,
-          message: `字典 ${reference.dictionaryId} 不存在`,
-        })),
-      });
-    }
-
-    dictionaries.validateImportDefinitions(migration.definitions);
-    const created = manager.create(config);
-    try {
-      dictionaries.importDefinitions(migration.definitions);
-    } catch (error) {
-      try {
-        await manager.remove(config.id);
-      } catch (rollbackError) {
-        throw new Error(
-          `字典迁移失败，且设备 ${config.id} 回滚失败：${errorMessage(rollbackError)}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    return reply.code(201).send(created);
+    return reply.code(201).send(result.value);
   });
 
   app.put('/api/devices/:id', async (request, reply) => {
     const { id } = IdParamsSchema.parse(request.params);
-    const migration = migrateInlineTextDictionaries(
-      request.body,
-      dictionaries.list(),
-      { source: id },
-    );
-    if (migration.errors.length > 0) {
-      return reply.code(422).send({
-        error: '内联字典迁移失败',
-        issues: migration.errors.map((error) => ({
-          path: `codec.dictionaries.${error.dictionary}`,
-          message: error.message,
-        })),
+    const result = deviceConfigs.update(id, request.body);
+    if (!result.ok) {
+      return reply.code(result.statusCode).send({
+        error: result.error,
+        ...(result.issues ? { issues: result.issues } : {}),
+        ...(result.message ? { message: result.message } : {}),
       });
     }
-
-    const parsed = DeviceConfigSchema.safeParse(migration.config);
-    if (!parsed.success) {
-      return reply.code(422).send({ error: '配置校验失败', issues: issuesOf(parsed.error) });
-    }
-    const config = parsed.data;
-    if (config.id !== id) {
-      return reply.code(400).send({ error: '请求路径中的 id 与配置中的 id 不一致' });
-    }
-
-    const summary = manager.get(id);
-    if (!summary) return reply.code(404).send({ error: `设备 ${id} 不存在` });
-    if (manager.hasInvalidRecord(id)) {
-      return reply.code(409).send({ error: `设备 ${id} 还有同 ID 的无效配置记录，请先修复 devices.json` });
-    }
-    if (manager.find(id)?.isActive) {
-      return reply.code(409).send({ error: '请先停止设备再修改配置' });
-    }
-
-    const available = new Set([
-      ...dictionaries.list().map((item) => item.id),
-      ...migration.definitions.map((item) => item.id),
-    ]);
-    const missing = findMissingDictionaryReferences(
-      config,
-      (idValue) => available.has(idValue),
-    );
-    if (missing.length > 0) {
-      return reply.code(422).send({
-        error: '配置校验失败',
-        issues: missing.map((reference) => ({
-          path: reference.path,
-          message: `字典 ${reference.dictionaryId} 不存在`,
-        })),
-      });
-    }
-
-    dictionaries.validateImportDefinitions(migration.definitions);
-    const previous = summary.config;
-    const updated = manager.update(id, config);
-    try {
-      dictionaries.importDefinitions(migration.definitions);
-    } catch (error) {
-      try {
-        manager.update(id, previous);
-      } catch (rollbackError) {
-        throw new Error(
-          `字典迁移失败，且设备 ${id} 回滚失败：${errorMessage(rollbackError)}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    return updated;
+    return result.value;
   });
 
   app.delete('/api/devices/:id', async (request, reply) => {
