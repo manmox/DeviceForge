@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -13,7 +12,6 @@ import {
   type DictionaryProvider,
   type GlobalDictionaryDefinition,
 } from '@deviceforge/core';
-import YAML from 'yaml';
 import { z } from 'zod';
 
 const StoreFileSchema = z.object({
@@ -69,7 +67,6 @@ function sameDefinition(
 }
 
 export class DictionaryStore implements DictionaryRepository {
-  private readonly builtins = new Map<string, GlobalDictionaryDefinition>();
   private readonly users = new Map<string, GlobalDictionaryDefinition>();
   /** 用户文件中单条无效记录；保存时原样写回，避免静默丢数据。 */
   private readonly invalidUserRecords: unknown[] = [];
@@ -78,31 +75,20 @@ export class DictionaryStore implements DictionaryRepository {
     get: (id) => this.get(id)?.entries,
   };
 
-  constructor(
-    private readonly userFilePath: string,
-    builtinDir: string,
-  ) {
-    this.loadBuiltins(builtinDir);
+  constructor(private readonly userFilePath: string) {
     this.loadUsers();
   }
 
   list(): GlobalDictionaryDefinition[] {
-    return [
-      ...[...this.builtins.values()].sort(byId),
-      ...[...this.users.values()].sort(byId),
-    ];
+    return [...this.users.values()].sort(byId);
   }
 
   get(id: string): GlobalDictionaryDefinition | undefined {
-    return this.builtins.get(id) ?? this.users.get(id);
+    return this.users.get(id);
   }
 
   has(id: string): boolean {
-    return this.builtins.has(id) || this.users.has(id);
-  }
-
-  isBuiltin(id: string): boolean {
-    return this.builtins.has(id);
+    return this.users.has(id);
   }
 
   create(definition: GlobalDictionaryDefinition): GlobalDictionaryDefinition {
@@ -120,9 +106,6 @@ export class DictionaryStore implements DictionaryRepository {
     id: string,
     definition: GlobalDictionaryDefinition,
   ): GlobalDictionaryDefinition {
-    if (this.builtins.has(id)) {
-      throw new DictionaryStoreError(`内置字典 ${id} 只读`, 403);
-    }
     if (!this.users.has(id)) {
       throw new DictionaryStoreError(`字典 ${id} 不存在`, 404);
     }
@@ -137,9 +120,6 @@ export class DictionaryStore implements DictionaryRepository {
   }
 
   delete(id: string): boolean {
-    if (this.builtins.has(id)) {
-      throw new DictionaryStoreError(`内置字典 ${id} 只读`, 403);
-    }
     if (!this.users.has(id)) {
       throw new DictionaryStoreError(`字典 ${id} 不存在`, 404);
     }
@@ -190,38 +170,6 @@ export class DictionaryStore implements DictionaryRepository {
     };
   }
 
-  private loadBuiltins(builtinDir: string): void {
-    if (!existsSync(builtinDir)) {
-      console.warn(`[dictionaries] 内置字典目录不存在：${builtinDir}`);
-      return;
-    }
-
-    const files = readdirSync(builtinDir)
-      .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
-      .sort();
-    for (const file of files) {
-      try {
-        const raw = YAML.parse(
-          readFileSync(path.join(builtinDir, file), 'utf8'),
-        );
-        const parsed = GlobalDictionaryDefinitionSchema.safeParse(raw);
-        if (!parsed.success) {
-          console.warn(`[dictionaries] 跳过无效内置字典 ${file}`, parsed.error.issues);
-          continue;
-        }
-        if (this.builtins.has(parsed.data.id)) {
-          console.warn(
-            `[dictionaries] 内置字典 ID ${parsed.data.id} 重复，保留先加载的文件`,
-          );
-          continue;
-        }
-        this.builtins.set(parsed.data.id, parsed.data);
-      } catch (error) {
-        console.warn(`[dictionaries] 读取内置字典 ${file} 失败`, error);
-      }
-    }
-  }
-
   private loadUsers(): void {
     if (!existsSync(this.userFilePath)) return;
 
@@ -235,9 +183,9 @@ export class DictionaryStore implements DictionaryRepository {
           this.invalidUserRecords.push(item);
           continue;
         }
-        if (this.has(definition.data.id)) {
+        if (this.users.has(definition.data.id)) {
           console.warn(
-            `[dictionaries] 用户字典 ${definition.data.id} 与已有 ID 冲突，已跳过`,
+            `[dictionaries] 用户字典 ${definition.data.id} 重复，已跳过`,
           );
           this.invalidUserRecords.push(item);
           continue;

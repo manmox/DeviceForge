@@ -17,10 +17,7 @@ async function main(): Promise<void> {
     logger: { level: process.env.LOG_LEVEL ?? 'info' },
   });
 
-  const dictionaries = new DictionaryStore(
-    paths.dictionariesFile,
-    paths.builtinDictionariesDir,
-  );
+  const dictionaries = new DictionaryStore(paths.dictionariesFile);
   const store = new DeviceStore(paths.devicesFile, dictionaries);
   const manager = new RuntimeManager(store, dictionaries.provider());
 

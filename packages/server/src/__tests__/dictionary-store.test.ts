@@ -10,7 +10,6 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import YAML from 'yaml';
 import { DictionaryStore, DictionaryStoreError } from '../store/dictionary-store';
 
 const directories: string[] = [];
@@ -27,30 +26,17 @@ afterEach(() => {
   }
 });
 
-function writeBuiltin(dir: string, name: string, definition: unknown): void {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    path.join(dir, `${name}.yaml`),
-    YAML.stringify(definition),
-    'utf8',
-  );
-}
-
 describe('DictionaryStore', () => {
-  it('loads built-ins before user dictionaries and sorts each group by id', () => {
+  it('只从本机用户数据文件加载字典，不扫描仓库目录', () => {
     const dir = tempDir();
-    const builtinDir = path.join(dir, 'builtin');
     const userFile = path.join(dir, 'dictionaries.json');
-    writeBuiltin(builtinDir, 'z', {
-      id: 'z-builtin',
-      name: 'Z',
-      entries: {},
-    });
-    writeBuiltin(builtinDir, 'a', {
-      id: 'a-builtin',
-      name: 'A',
-      entries: {},
-    });
+    const formerBuiltinDir = path.join(dir, 'dictionaries');
+    mkdirSync(formerBuiltinDir, { recursive: true });
+    writeFileSync(
+      path.join(formerBuiltinDir, 'codes.yaml'),
+      'id: leaked-codes\nname: 仓库字典\nentries: {}\n',
+      'utf8',
+    );
     writeFileSync(
       userFile,
       JSON.stringify({
@@ -63,30 +49,19 @@ describe('DictionaryStore', () => {
       'utf8',
     );
 
-    const store = new DictionaryStore(userFile, builtinDir);
-    expect(store.list().map((item) => item.id)).toEqual([
-      'a-builtin',
-      'z-builtin',
-      'user-a',
-      'user-b',
-    ]);
-    expect(store.isBuiltin('a-builtin')).toBe(true);
+    const store = new DictionaryStore(userFile);
+    expect(store.list().map((item) => item.id)).toEqual(['user-a', 'user-b']);
+    expect(store.get('leaked-codes')).toBeUndefined();
     expect(store.get('user-a')?.name).toBe('A');
   });
 
-  it('backs up a corrupt user file and continues with built-ins', () => {
+  it('字典文件损坏时备份文件并以空列表启动', () => {
     const dir = tempDir();
-    const builtinDir = path.join(dir, 'builtin');
     const userFile = path.join(dir, 'dictionaries.json');
-    writeBuiltin(builtinDir, 'base', {
-      id: 'base',
-      name: 'Base',
-      entries: {},
-    });
     writeFileSync(userFile, '{not-json', 'utf8');
 
-    const store = new DictionaryStore(userFile, builtinDir);
-    expect(store.list().map((item) => item.id)).toEqual(['base']);
+    const store = new DictionaryStore(userFile);
+    expect(store.list()).toEqual([]);
     expect(
       readdirSync(dir).some((name) => name.startsWith('dictionaries.json.corrupt-')),
     ).toBe(true);
@@ -94,10 +69,7 @@ describe('DictionaryStore', () => {
 
   it('creates, updates and deletes user dictionaries with live provider updates', () => {
     const dir = tempDir();
-    const store = new DictionaryStore(
-      path.join(dir, 'dictionaries.json'),
-      path.join(dir, 'builtin'),
-    );
+    const store = new DictionaryStore(path.join(dir, 'dictionaries.json'));
     let changes = 0;
     store.onChange(() => {
       changes += 1;
@@ -130,31 +102,25 @@ describe('DictionaryStore', () => {
     ).toEqual([]);
   });
 
-  it('rejects duplicate IDs and built-in writes', () => {
+  it('拒绝重复 ID，并拒绝更新或删除不存在的字典', () => {
     const dir = tempDir();
-    const builtinDir = path.join(dir, 'builtin');
-    writeBuiltin(builtinDir, 'base', {
-      id: 'base',
-      name: 'Base',
-      entries: {},
-    });
-    const store = new DictionaryStore(path.join(dir, 'dictionaries.json'), builtinDir);
+    const store = new DictionaryStore(path.join(dir, 'dictionaries.json'));
 
+    store.create({ id: 'base', name: 'Base', entries: {} });
+    expect(() => store.create({ id: 'base', name: 'duplicate', entries: {} })).toThrow(
+      DictionaryStoreError,
+    );
     expect(() =>
-      store.create({ id: 'base', name: 'duplicate', entries: {} }),
-    ).toThrow(DictionaryStoreError);
-    expect(() =>
-      store.update('base', { id: 'base', name: 'changed', entries: {} }),
-    ).toThrow(DictionaryStoreError);
-    expect(() => store.delete('base')).toThrow(DictionaryStoreError);
+      store.update('missing', { id: 'missing', name: 'changed', entries: {} }),
+    ).toThrowError(expect.objectContaining({ statusCode: 404 }));
+    expect(() => store.delete('missing')).toThrowError(
+      expect.objectContaining({ statusCode: 404 }),
+    );
   });
 
   it('imports definitions idempotently and rejects content conflicts', () => {
     const dir = tempDir();
-    const store = new DictionaryStore(
-      path.join(dir, 'dictionaries.json'),
-      path.join(dir, 'builtin'),
-    );
+    const store = new DictionaryStore(path.join(dir, 'dictionaries.json'));
     const definition = {
       id: 'imported',
       name: '导入',

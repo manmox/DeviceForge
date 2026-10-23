@@ -75,7 +75,6 @@ describe('DeviceStore dictionary migration', () => {
     const dir = tempDir();
     const devicesFile = path.join(dir, 'devices.json');
     const dictionariesFile = path.join(dir, 'dictionaries.json');
-    const builtinDir = path.join(dir, 'builtin');
     const inline: DictionaryEntries = {
       '000': { name: '电压', unit: 'V' },
     };
@@ -99,7 +98,7 @@ describe('DeviceStore dictionary migration', () => {
       'utf8',
     );
 
-    const dictionaries = new DictionaryStore(dictionariesFile, builtinDir);
+    const dictionaries = new DictionaryStore(dictionariesFile);
     const store = new DeviceStore(devicesFile, dictionaries);
     expect(store.list().map((item) => item.id).sort()).toEqual([
       'device-a',
@@ -125,7 +124,7 @@ describe('DeviceStore dictionary migration', () => {
     const backupCount = readdirSync(dir).filter((name) =>
       name.startsWith('devices.json.pre-dictionary-migration-'),
     ).length;
-    const reloadedDictionaries = new DictionaryStore(dictionariesFile, builtinDir);
+    const reloadedDictionaries = new DictionaryStore(dictionariesFile);
     const reloaded = new DeviceStore(devicesFile, reloadedDictionaries);
     expect(reloaded.list().map((item) => item.id).sort()).toEqual([
       'device-a',
@@ -142,7 +141,6 @@ describe('DeviceStore dictionary migration', () => {
     const dir = tempDir();
     const devicesFile = path.join(dir, 'devices.json');
     const dictionariesFile = path.join(dir, 'dictionaries.json');
-    const builtinDir = path.join(dir, 'builtin');
     writeFileSync(
       devicesFile,
       JSON.stringify({
@@ -157,7 +155,7 @@ describe('DeviceStore dictionary migration', () => {
       'utf8',
     );
 
-    const dictionaries = new DictionaryStore(dictionariesFile, builtinDir);
+    const dictionaries = new DictionaryStore(dictionariesFile);
     const store = new DeviceStore(devicesFile, dictionaries);
     expect(store.list().map((item) => item.id)).toEqual(['good']);
     expect(existsSync(devicesFile)).toBe(true);

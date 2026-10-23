@@ -33,12 +33,10 @@ function usageByDevice(store: DeviceStore): Map<string, Usage[]> {
 
 function view(
   definition: GlobalDictionaryDefinition,
-  dictionaries: DictionaryStore,
   usage: Map<string, Usage[]>,
 ) {
   return {
     ...definition,
-    builtin: dictionaries.isBuiltin(definition.id),
     usedBy: usage.get(definition.id) ?? [],
   };
 }
@@ -53,7 +51,7 @@ export async function registerDictionaryRoutes(
     return {
       dictionaries: dictionaries
         .list()
-        .map((definition) => view(definition, dictionaries, usage)),
+        .map((definition) => view(definition, usage)),
     };
   });
 
@@ -64,7 +62,7 @@ export async function registerDictionaryRoutes(
       return reply.code(404).send({ error: `字典 ${id} 不存在` });
     }
     return {
-      dictionary: view(definition, dictionaries, usageByDevice(devices)),
+      dictionary: view(definition, usageByDevice(devices)),
     };
   });
 
@@ -72,7 +70,7 @@ export async function registerDictionaryRoutes(
     const definition = GlobalDictionaryDefinitionSchema.parse(request.body);
     const created = dictionaries.create(definition);
     return reply.code(201).send({
-      dictionary: view(created, dictionaries, usageByDevice(devices)),
+      dictionary: view(created, usageByDevice(devices)),
     });
   });
 
@@ -86,7 +84,7 @@ export async function registerDictionaryRoutes(
     }
     const updated = dictionaries.update(id, definition);
     return {
-      dictionary: view(updated, dictionaries, usageByDevice(devices)),
+      dictionary: view(updated, usageByDevice(devices)),
     };
   });
 
@@ -96,10 +94,6 @@ export async function registerDictionaryRoutes(
     if (!definition) {
       return reply.code(404).send({ error: `字典 ${id} 不存在` });
     }
-    if (dictionaries.isBuiltin(id)) {
-      return reply.code(403).send({ error: `内置字典 ${id} 只读` });
-    }
-
     const usedBy = usageByDevice(devices).get(id) ?? [];
     if (usedBy.length > 0) {
       return reply.code(409).send({
