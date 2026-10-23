@@ -1,12 +1,16 @@
 import type {
   TextCodecConfig,
-  TextDictionaryEntry,
   TextField,
   TextMessage,
   TextRepeat,
   TextSlot,
-  TextValueFormat,
 } from '../schema/device';
+import type {
+  DictionaryEntries,
+  TextDictionaryEntry,
+  TextValueFormat,
+} from '../schema/dictionary';
+import type { DictionaryProvider } from '../dictionary/provider';
 import type { DecodeResult } from './index';
 import {
   parseInt16ArrayValue,
@@ -150,14 +154,14 @@ function parseFieldValueWithWarnings(
 function dictionaryForToken(
   repeat: TextRepeat,
   parts: string[],
-  config: TextCodecConfig,
+  dictionary: DictionaryEntries | undefined,
 ): TextDictionaryEntry | undefined {
-  if (!repeat.dictionary || !repeat.keyField) return undefined;
+  if (!repeat.keyField) return undefined;
   const index = repeat.fields.findIndex((field) => field.name === repeat.keyField);
   if (index < 0) return undefined;
   const key = parts[index];
   if (key === undefined) return undefined;
-  return config.dictionaries?.[repeat.dictionary]?.[key];
+  return dictionary?.[key];
 }
 
 function parseWaveformOrFallback(
@@ -187,16 +191,15 @@ function parseWaveformOrFallback(
 function warnUnknownDictionaryEntry(
   repeat: TextRepeat,
   parts: string[],
-  config: TextCodecConfig,
+  dictionary: DictionaryEntries,
   warnings: string[],
 ): void {
-  if (!repeat.dictionary || !repeat.keyField) return;
-  if (!config.dictionaries?.[repeat.dictionary]) return;
+  if (!repeat.keyField) return;
   const index = repeat.fields.findIndex((field) => field.name === repeat.keyField);
   if (index < 0) return;
   const key = parts[index];
   if (key === undefined) return;
-  if (!config.dictionaries[repeat.dictionary]?.[key]) {
+  if (!dictionary[key]) {
     warnings.push(`repeat ${repeat.name} 的字典码 ${key} 不存在，已保留原始值`);
   }
 }
@@ -218,7 +221,20 @@ function parseRepeat(
   fields: Record<string, unknown>,
   config: TextCodecConfig,
   warnings: string[],
+  dictionaries?: DictionaryProvider,
 ): number {
+  const dictionary =
+    repeat.dictionary !== undefined && repeat.keyField !== undefined
+      ? dictionaries?.get(repeat.dictionary)
+      : undefined;
+  if (
+    repeat.dictionary !== undefined &&
+    repeat.keyField !== undefined &&
+    dictionary === undefined
+  ) {
+    warnings.push(`字典 ${repeat.dictionary} 不存在，已保留原始值`);
+  }
+
   const count = fields[repeat.countField];
   if (
     typeof count !== 'number' ||
@@ -253,8 +269,8 @@ function parseRepeat(
       );
     }
 
-    const entry = dictionaryForToken(repeat, parts, config);
-    warnUnknownDictionaryEntry(repeat, parts, config, warnings);
+    const entry = dictionaryForToken(repeat, parts, dictionary);
+    if (dictionary) warnUnknownDictionaryEntry(repeat, parts, dictionary, warnings);
     const item: Record<string, unknown> = { raw: rawItem };
     let waveform: TextWaveform | undefined;
 
@@ -350,11 +366,21 @@ function parseSlotsLeft(
   fields: Record<string, unknown>,
   config: TextCodecConfig,
   warnings: string[],
+  dictionaries?: DictionaryProvider,
 ): number {
   let index = start;
   for (const slot of slots) {
     if (slot.kind === 'repeat') {
-      index = parseRepeat(slot, tokens, index, end, fields, config, warnings);
+      index = parseRepeat(
+        slot,
+        tokens,
+        index,
+        end,
+        fields,
+        config,
+        warnings,
+        dictionaries,
+      );
       continue;
     }
     if (index >= end) {
@@ -426,6 +452,7 @@ function parseMessage(
   tokens: string[],
   config: TextCodecConfig,
   warnings: string[],
+  dictionaries?: DictionaryProvider,
 ): Record<string, unknown> {
   const start = message.prefix !== undefined ? 1 : 0;
   const end = message.suffix !== undefined ? tokens.length - 1 : tokens.length;
@@ -446,6 +473,7 @@ function parseMessage(
       fields,
       config,
       warnings,
+      dictionaries,
     );
     if (consumed !== body.length) {
       throw new TextParseError(
@@ -464,6 +492,7 @@ function parseMessage(
       fields,
       config,
       warnings,
+      dictionaries,
     );
     let right = parseSlotsRight(
       after,
@@ -522,6 +551,7 @@ function parseMessage(
 export function parseTextFrame(
   frame: Buffer,
   config: TextCodecConfig,
+  dictionaries?: DictionaryProvider,
 ): DecodeResult {
   const body = stripTerminator(frame, config.terminator);
   const text = body.toString('utf8');
@@ -542,7 +572,13 @@ export function parseTextFrame(
     if (!matchMessage(message, tokens)) continue;
     const warnings: string[] = [];
     try {
-      const fields = parseMessage(message, tokens, config, warnings);
+      const fields = parseMessage(
+        message,
+        tokens,
+        config,
+        warnings,
+        dictionaries,
+      );
       if (warnings.length > 0) fields._warnings = warnings;
       return {
         fields,

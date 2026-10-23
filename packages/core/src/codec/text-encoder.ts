@@ -1,12 +1,13 @@
 import type {
   OutgoingMessage,
   TextCodecConfig,
-  TextDictionaryEntry,
   TextField,
   TextMessage,
   TextRepeat,
   TextSlot,
 } from '../schema/device';
+import type { TextDictionaryEntry } from '../schema/dictionary';
+import type { DictionaryProvider } from '../dictionary/provider';
 import type {
   EncodeContext,
   PreparedOutbound,
@@ -151,12 +152,14 @@ function renderFieldToken(
 function dictionaryEntryForItem(
   repeat: TextRepeat,
   item: Record<string, unknown>,
-  config: TextCodecConfig,
+  dictionaries?: DictionaryProvider,
 ): TextDictionaryEntry | undefined {
   if (!repeat.dictionary || !repeat.keyField) return undefined;
+  const dictionary = dictionaries?.get(repeat.dictionary);
+  if (!dictionary) throw new Error(`字典 ${repeat.dictionary} 不存在`);
   const key = item[repeat.keyField];
   if (key === undefined || key === null) return undefined;
-  return config.dictionaries?.[repeat.dictionary]?.[textOf(key)];
+  return dictionary[textOf(key)];
 }
 
 function renderRepeatItem(
@@ -165,12 +168,13 @@ function renderRepeatItem(
   index: number,
   ctx: EncodeContext,
   config: TextCodecConfig,
+  dictionaries?: DictionaryProvider,
 ): string {
   if (item === null || typeof item !== 'object' || Array.isArray(item)) {
     throw new Error(`repeat ${repeat.name} 第 ${index + 1} 组必须是对象`);
   }
   const record = item as Record<string, unknown>;
-  const entry = dictionaryEntryForItem(repeat, record, config);
+  const entry = dictionaryEntryForItem(repeat, record, dictionaries);
   const parts: string[] = [];
 
   for (const field of repeat.fields) {
@@ -321,6 +325,7 @@ function renderSlot(
   ctx: EncodeContext,
   config: TextCodecConfig,
   sequences: TextSequenceAllocator,
+  dictionaries?: DictionaryProvider,
 ): string[] {
   if (slot.kind === 'literal') return [slot.value];
 
@@ -331,7 +336,7 @@ function renderSlot(
     }
     fields[slot.countField] = raw.length;
     return raw.map((item, index) =>
-      renderRepeatItem(slot, item, index, ctx, config),
+      renderRepeatItem(slot, item, index, ctx, config, dictionaries),
     );
   }
 
@@ -370,6 +375,7 @@ export function encodeTextMessage(
   ctx: EncodeContext,
   config: TextCodecConfig,
   sequences: TextSequenceAllocator,
+  dictionaries?: DictionaryProvider,
 ): Buffer {
   if (message.hex !== undefined) return Buffer.from(message.hex, 'hex');
 
@@ -395,7 +401,7 @@ export function encodeTextMessage(
   const tokens: string[] = [];
   if (selected.prefix !== undefined) tokens.push(selected.prefix);
   for (const slot of selected.slots) {
-    tokens.push(...renderSlot(slot, fields, ctx, config, sequences));
+    tokens.push(...renderSlot(slot, fields, ctx, config, sequences, dictionaries));
   }
   if (selected.suffix !== undefined) tokens.push(selected.suffix);
 

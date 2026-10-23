@@ -1,5 +1,5 @@
 import type { ChecksumConfig } from '../schema/device';
-import type { Endian } from '../schema/device';
+import type { Endian } from '../schema/common';
 
 export type ChecksumAlgo = ChecksumConfig['algo'];
 

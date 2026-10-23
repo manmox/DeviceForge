@@ -1,7 +1,6 @@
 import { z } from 'zod';
-
-export const EndianSchema = z.enum(['be', 'le']);
-export type Endian = z.infer<typeof EndianSchema>;
+import { EndianSchema } from './common';
+import { DictionaryIdSchema } from './dictionary';
 
 const HostSchema = z.string().min(1).default('127.0.0.1');
 const PortSchema = z.number().int().min(0).max(65535);
@@ -346,7 +345,8 @@ export const TextRepeatSchema = z.object({
   valueSeparator: z.string().min(1).default('|'),
   fields: z.array(TextRepeatItemFieldSchema).min(1),
   valueField: z.string().min(1).default('values'),
-  dictionary: z.string().min(1).optional(),
+  // 全局数据字典 ID；字典内容不在设备配置中保存。
+  dictionary: DictionaryIdSchema.optional(),
   keyField: z.string().min(1).optional(),
   mapField: z.string().min(1).optional(),
   mapKeyPrefix: z.string().optional(),
@@ -415,31 +415,6 @@ export const TextMessageSchema = z.object({
 });
 
 export type TextMessage = z.infer<typeof TextMessageSchema>;
-
-export const TextValueFormatSchema = z.object({
-  type: z.literal('int16Array'),
-  points: z.number().int().min(1).max(65536).default(1024),
-  endian: EndianSchema.default('be'),
-  encoding: z.enum(['hex', 'base64']).default('hex'),
-  crc: z
-    .object({
-      algo: z.literal('crc16-modbus'),
-      endian: EndianSchema.default('le'),
-    })
-    .optional(),
-});
-
-export type TextValueFormat = z.infer<typeof TextValueFormatSchema>;
-
-export const TextDictionaryEntrySchema = z.object({
-  name: z.string().optional(),
-  unit: z.string().optional(),
-  multi: z.boolean().optional(),
-  description: z.string().optional(),
-  valueFormat: TextValueFormatSchema.optional(),
-});
-
-export type TextDictionaryEntry = z.infer<typeof TextDictionaryEntrySchema>;
 
 export const TextSessionSchema = z.object({
   ackMessage: z.string().min(1),
@@ -658,9 +633,6 @@ export const TextCodecSchema = z
     trim: z.boolean().default(true),
     timezone: z.string().min(1).default('local'),
     messages: z.array(TextMessageSchema).min(1),
-    dictionaries: z
-      .record(z.string(), z.record(z.string(), TextDictionaryEntrySchema))
-      .optional(),
     session: TextSessionSchema.optional(),
   })
   .superRefine((codec, ctx) => {
@@ -693,21 +665,6 @@ export const TextCodecSchema = z
         'messages',
         index,
       ]);
-    }
-
-    for (let messageIndex = 0; messageIndex < codec.messages.length; messageIndex += 1) {
-      const message = codec.messages[messageIndex]!;
-      for (let slotIndex = 0; slotIndex < message.slots.length; slotIndex += 1) {
-        const slot = message.slots[slotIndex]!;
-        if (slot.kind !== 'repeat') continue;
-        if (slot.dictionary !== undefined && !codec.dictionaries?.[slot.dictionary]) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['messages', messageIndex, 'slots', slotIndex, 'dictionary'],
-            message: `字典 ${slot.dictionary} 不存在`,
-          });
-        }
-      }
     }
 
     if (codec.session) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DeviceConfigSchema } from '../schema/device';
+import { GlobalDictionaryDefinitionSchema } from '../schema/dictionary';
 
 function baseConfig() {
   return {
@@ -216,7 +217,7 @@ describe('DeviceConfigSchema text codec', () => {
     ).toBe(true);
   });
 
-  it('validates optional, repeat, dictionary and session references', () => {
+  it('validates optional, repeat and session references', () => {
     const cases = [
       {
         codec: textCodec({
@@ -263,29 +264,6 @@ describe('DeviceConfigSchema text codec', () => {
               name: 'bad',
               slots: [
                 {
-                  kind: 'repeat',
-                  name: 'items',
-                  countField: 'count',
-                  itemSeparator: '*',
-                  dictionary: 'missing',
-                  valueField: 'values',
-                  fields: [
-                    { kind: 'field', name: 'values', type: 'stringList' },
-                  ],
-                },
-              ],
-            },
-          ],
-        }),
-        path: 'messages.0.slots.0.dictionary',
-      },
-      {
-        codec: textCodec({
-          messages: [
-            {
-              name: 'bad',
-              slots: [
-                {
                   kind: 'field',
                   name: 'timestamp',
                   type: 'timestamp',
@@ -323,6 +301,104 @@ describe('DeviceConfigSchema text codec', () => {
         ),
       ).toBe(true);
     }
+  });
+});
+
+describe('global dictionary schema', () => {
+  it('accepts valid IDs and empty entries', () => {
+    expect(
+      GlobalDictionaryDefinitionSchema.parse({
+        id: 'sample-codes',
+        name: '示例设备码表',
+        entries: {},
+      }),
+    ).toMatchObject({
+      id: 'sample-codes',
+      name: '示例设备码表',
+      entries: {},
+    });
+  });
+
+  it('rejects invalid IDs and empty names', () => {
+    for (const id of ['', '-bad', 'bad id', 'bad.id', 'x'.repeat(65)]) {
+      const result = GlobalDictionaryDefinitionSchema.safeParse({
+        id,
+        name: 'bad',
+        entries: {},
+      });
+      expect(result.success).toBe(false);
+    }
+    expect(
+      GlobalDictionaryDefinitionSchema.safeParse({
+        id: 'good',
+        name: '',
+        entries: {},
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a global dictionary ID in text repeats without inline entries', () => {
+    const parsed = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      codec: {
+        type: 'text',
+        messages: [
+          {
+            name: 'report',
+            slots: [
+              { kind: 'field', name: 'count', type: 'int' },
+              {
+                kind: 'repeat',
+                name: 'items',
+                countField: 'count',
+                dictionary: 'remote-codes',
+                valueField: 'values',
+                fields: [{ kind: 'field', name: 'values', type: 'stringList' }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(parsed.codec.type).toBe('text');
+    if (parsed.codec.type !== 'text') return;
+    expect(parsed.codec.messages[0]?.slots[1]).toMatchObject({
+      kind: 'repeat',
+      dictionary: 'remote-codes',
+    });
+    expect('dictionaries' in parsed.codec).toBe(false);
+  });
+
+  it('rejects invalid dictionary IDs in repeats', () => {
+    const result = DeviceConfigSchema.safeParse({
+      ...baseConfig(),
+      codec: {
+        type: 'text',
+        messages: [
+          {
+            name: 'report',
+            slots: [
+              { kind: 'field', name: 'count', type: 'int' },
+              {
+                kind: 'repeat',
+                name: 'items',
+                countField: 'count',
+                dictionary: 'bad.id',
+                valueField: 'values',
+                fields: [{ kind: 'field', name: 'values', type: 'stringList' }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.some((issue) =>
+        issue.path.join('.').includes('dictionary'),
+      ),
+    ).toBe(true);
   });
 });
 

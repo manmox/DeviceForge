@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   createCodec,
+  createDictionaryProvider,
   TextCodecSchema,
+  type DictionaryEntries,
+  type DictionaryProvider,
   type EncodeContext,
   type TextCodecConfig,
 } from '../index';
@@ -9,8 +12,36 @@ import {
 const DEVICE_CODE = '000000000000000';
 const NOW = Date.UTC(2026, 9, 22, 10, 11, 12);
 
-function makeCodec(config: unknown) {
-  return createCodec(TextCodecSchema.parse(config));
+const sampleDictionaryEntries: DictionaryEntries = {
+  '101': { name: '示例数值', unit: 'V' },
+  '202': {
+    name: '示例数组',
+    unit: 'Hz',
+    valueFormat: {
+      type: 'int16Array',
+      points: 4,
+      endian: 'be',
+      encoding: 'hex',
+      crc: { algo: 'crc16-modbus', endian: 'le' },
+    },
+  },
+};
+
+const sampleDictionaries = createDictionaryProvider([
+  {
+    id: 'sampleCodes',
+    name: 'sampleCodes',
+    entries: sampleDictionaryEntries,
+  },
+]);
+
+function makeCodec(
+  config: unknown,
+  dictionaries: DictionaryProvider | null = sampleDictionaries,
+) {
+  return createCodec(TextCodecSchema.parse(config), {
+    dictionaries: dictionaries ?? undefined,
+  });
 }
 
 function makeContext(overrides: Partial<EncodeContext> = {}): EncodeContext {
@@ -164,22 +195,6 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
       ],
     },
   ],
-  dictionaries: {
-    sampleCodes: {
-      '000': { name: '示例数值', unit: 'V' },
-      '220': {
-        name: '示例数组',
-        unit: 'Hz',
-        valueFormat: {
-          type: 'int16Array',
-          points: 4,
-          endian: 'be',
-          encoding: 'hex',
-          crc: { algo: 'crc16-modbus', endian: 'le' },
-        },
-      },
-    },
-  },
   session: {
     ackMessage: 'ack',
     trackMessages: ['report'],
@@ -376,10 +391,14 @@ describe('text codec repeat and dictionaries', () => {
   });
 
   it('supports base64 waveform values', () => {
-    const config = structuredClone(sampleTextConfig);
-    const format = config.dictionaries!.sampleCodes['220']!.valueFormat!;
-    format.encoding = 'base64';
-    const codec = makeCodec(config);
+    const entries = structuredClone(sampleDictionaryEntries);
+    entries['202']!.valueFormat!.encoding = 'base64';
+    const codec = makeCodec(
+      sampleTextConfig,
+      createDictionaryProvider([
+        { id: 'sampleCodes', name: 'sampleCodes', entries },
+      ]),
+    );
     const data = codec.encode(
       {
         fields: {
@@ -439,6 +458,57 @@ describe('text codec repeat and dictionaries', () => {
       crcValid: false,
       points: null,
     });
+  });
+
+  it('warns and preserves raw values when the global dictionary is missing', () => {
+    const codec = makeCodec(sampleTextConfig, null);
+    const data = Buffer.from(
+      `RPT:${DEVICE_CODE}:01:101*12.7:2026-10-22 10-11-12:1:DONE\r\n`,
+    );
+    const decoded = codec.decode(data);
+    expect(decoded.valid).toBe(true);
+    expect(decoded.warnings?.join(' ')).toContain('字典 sampleCodes 不存在');
+    expect(decoded.fields.data).toMatchObject({
+      item101: { value: '12.7', values: ['12.7'] },
+    });
+    expect(() =>
+      codec.encode(
+        {
+          fields: {
+            kind: 'report',
+            groups: [{ id: '101', values: ['12.7'] }],
+          },
+        },
+        makeContext(),
+      ),
+    ).toThrow('字典 sampleCodes 不存在');
+  });
+
+  it('uses live dictionary changes without rebuilding the codec', () => {
+    let entries: DictionaryEntries = {
+      '101': { name: '旧名称', unit: 'V' },
+    };
+    const provider: DictionaryProvider = { get: () => entries };
+    const codec = makeCodec(sampleTextConfig, provider);
+    const frame = codec.encode(
+      {
+        fields: {
+          kind: 'report',
+          groups: [{ id: '101', values: ['12.7'] }],
+        },
+      },
+      makeContext(),
+    );
+    expect(
+      (codec.decode(frame).fields.data as Record<string, Record<string, unknown>>)
+        .item101?.name,
+    ).toBe('旧名称');
+
+    entries = { '000': { name: '新名称', unit: 'V' } };
+    expect(
+      (codec.decode(frame).fields.data as Record<string, Record<string, unknown>>)
+        .item101?.name,
+    ).toBe('新名称');
   });
 });
 

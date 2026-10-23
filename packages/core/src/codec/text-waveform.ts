@@ -1,5 +1,5 @@
 import { encodeChecksum } from '../checksum';
-import type { TextValueFormat } from '../schema/device';
+import type { TextValueFormat } from '../schema/dictionary';
 
 export interface TextWaveform {
   encoding: TextValueFormat['encoding'];

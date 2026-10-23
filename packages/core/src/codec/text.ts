@@ -37,7 +37,7 @@ export class TextCodec implements Codec {
   ) {}
 
   decode(frame: Buffer): DecodeResult {
-    return parseTextFrame(frame, this.config);
+    return parseTextFrame(frame, this.config, this.options.dictionaries);
   }
 
   prepareOutbound(
@@ -61,6 +61,7 @@ export class TextCodec implements Codec {
       this.withDevice(ctx),
       this.config,
       this.sequenceAllocator(),
+      this.options.dictionaries,
     );
   }
 

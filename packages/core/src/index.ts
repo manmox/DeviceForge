@@ -1,5 +1,6 @@
 export * from './types';
-export * from './schema/device';
+export * from './schema';
+export * from './dictionary';
 export * from './checksum';
 export * from './framing';
 export * from './codec';

@@ -5,6 +5,7 @@ import type {
   FieldDef,
   OutgoingMessage,
 } from '../schema/device';
+import type { DictionaryProvider } from '../dictionary/provider';
 import type { ConnectionInfo, TrafficEvent } from '../types';
 import { TextCodec } from './text';
 
@@ -58,6 +59,8 @@ export interface Codec {
 
 export interface CodecOptions {
   deviceInfo?: DeviceInfo;
+  /** text codec 的 repeat 通过 ID 实时查询全局字典。 */
+  dictionaries?: DictionaryProvider;
 }
 
 const FIXED_SIZES: Partial<Record<FieldDef['type'], number>> = {

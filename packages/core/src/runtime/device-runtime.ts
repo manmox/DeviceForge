@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createCodec, tryDecode, type Codec } from '../codec';
+import type { DictionaryProvider } from '../dictionary/provider';
 import { createFramer, type FrameDecoder } from '../framing';
 import { matchesFields } from '../rules/matcher';
 import { evaluateFields, type TemplateContext } from '../rules/template';
@@ -39,6 +40,8 @@ export interface SendOptions {
 
 export interface DeviceRuntimeOptions {
   trafficCapacity?: number;
+  /** 运行时实时读取全局数据字典；字典编辑后无需重启设备。 */
+  dictionaries?: DictionaryProvider;
 }
 
 type RuleTrigger = 'start' | 'connect' | 'frame' | 'interval';
@@ -81,6 +84,7 @@ export class DeviceRuntime {
   };
 
   private codec: Codec;
+  private readonly dictionaryProvider?: DictionaryProvider;
   private rules: Rule[];
   private state: Record<string, unknown>;
   private templateCounters: Record<string, number> = { tx: 0, rx: 0 };
@@ -95,7 +99,11 @@ export class DeviceRuntime {
     options: DeviceRuntimeOptions = {},
   ) {
     this._config = config;
-    this.codec = createCodec(config.codec, { deviceInfo: config.deviceInfo });
+    this.dictionaryProvider = options.dictionaries;
+    this.codec = createCodec(config.codec, {
+      deviceInfo: config.deviceInfo,
+      dictionaries: this.dictionaryProvider,
+    });
     this.rules = config.rules;
     this.state = structuredClone(config.state);
     this.traffic = new TrafficBuffer(options.trafficCapacity ?? 5000);
@@ -241,7 +249,10 @@ export class DeviceRuntime {
     if (this.isActive) throw new Error('请先停止设备再修改配置');
 
     this._config = config;
-    this.codec = createCodec(config.codec, { deviceInfo: config.deviceInfo });
+    this.codec = createCodec(config.codec, {
+      deviceInfo: config.deviceInfo,
+      dictionaries: this.dictionaryProvider,
+    });
     this.protocolSession.stop();
     this.protocolSession = this.createProtocolSession();
     this.rules = [...config.rules];

@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema/device.ts",
+    "./schema": "./src/schema/index.ts",
     "./template-functions": "./src/rules/template-functions.ts"
   },
   "scripts": {
