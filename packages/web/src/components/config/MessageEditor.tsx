@@ -8,6 +8,7 @@ import {
 import { hexToBytes } from '../../lib/format';
 import { messageKind, withMessageKind } from '../../lib/rule-shape';
 import type { TemplateCompletionContext } from '../../lib/template-suggestions';
+import type { DictionaryRegistry } from '../../types';
 import { useIssueText } from '../form/ConfigIssuesContext';
 import {
   FormField,
@@ -21,6 +22,7 @@ export function MessageEditor({
   message,
   onChange,
   codec,
+  dictionaries,
   templateContext,
   path,
   disabled = false,
@@ -28,6 +30,7 @@ export function MessageEditor({
   message: OutgoingMessage;
   onChange: (next: OutgoingMessage) => void;
   codec: CodecConfig;
+  dictionaries?: DictionaryRegistry;
   templateContext?: TemplateCompletionContext;
   path: string;
   disabled?: boolean;
@@ -67,7 +70,9 @@ export function MessageEditor({
         {kind === 'fields' && (
           <button
             className="btn btn-outline btn-sm"
-            onClick={() => onChange({ fields: defaultFieldsForCodec(codec) })}
+            onClick={() =>
+              onChange({ fields: defaultFieldsForCodec(codec, dictionaries) })
+            }
             disabled={disabled}
             title="根据编解码字段生成默认值"
           >

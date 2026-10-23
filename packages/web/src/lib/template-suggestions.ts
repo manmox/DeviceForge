@@ -1,5 +1,6 @@
 import type { CodecConfig, DeviceInfo, FieldDef } from '@deviceforge/core';
 import { TEMPLATE_FUNCTIONS } from '@deviceforge/core/template-functions';
+import type { DictionaryRegistry } from '../types';
 import { fieldSummary } from './config-summary';
 import type { RuleTrigger } from './rule-shape';
 import {
@@ -31,6 +32,7 @@ export type TemplateSuggestionKind =
 export interface TemplateCompletionContext {
   roots: TemplateRoot[];
   codec?: CodecConfig;
+  dictionaries?: DictionaryRegistry;
   state?: Record<string, unknown>;
   deviceInfo?: DeviceInfo;
   counters?: readonly ('tx' | 'rx')[];
@@ -285,7 +287,7 @@ function reqCandidates(context: TemplateCompletionContext): Candidate[] {
       for (const slot of message.slots) {
         if (slot.kind !== 'repeat' || !slot.mapField) continue;
         if (!isValidKey(slot.mapField)) continue;
-        const dictionary = dictionaryOf(codec, slot);
+        const dictionary = dictionaryOf(context.dictionaries, slot);
         candidates.push({
           id: `req:${slot.mapField}`,
           kind: 'field',
@@ -355,7 +357,7 @@ function textMapCandidates(
   if (codec?.type !== 'text') return [];
   const found = findRepeatByMapField(codec, mapField);
   if (!found) return [];
-  const dictionary = dictionaryOf(codec, found.repeat);
+  const dictionary = dictionaryOf(context.dictionaries, found.repeat);
   if (!dictionary) return [];
 
   return Object.keys(dictionary)
@@ -393,7 +395,11 @@ function textMapEntryCandidates(
   const found = findRepeatByMapField(codec, mapField);
   if (!found) return [];
   const code = dictionaryCodeForMapKey(found.repeat, mapKey);
-  const entry = dictionaryEntry(codec, found.repeat, code);
+  const entry = dictionaryEntry(
+    context.dictionaries,
+    found.repeat,
+    code,
+  );
   const base = `req.${mapField}.${mapKey}`;
   const waveform: Candidate[] = entry?.valueFormat
     ? [

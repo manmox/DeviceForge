@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Menu } from 'lucide-react';
+import { DictionaryDialog } from './components/DictionaryDialog';
 import { NewDeviceDialog } from './components/NewDeviceDialog';
 import { Sidebar } from './components/Sidebar';
 import { Toast } from './components/Toast';
@@ -14,6 +15,9 @@ export default function App() {
   const init = useAppStore((state) => state.init);
   const device = useAppStore((state) => state.device);
   const detailLoading = useAppStore((state) => state.detailLoading);
+  const dictionaryOpen = useAppStore(
+    (state) => state.dictionaryDialog.open,
+  );
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -72,6 +76,7 @@ export default function App() {
       {newOpen && (
         <NewDeviceDialog onClose={closeNew} initialPresetFile={initialPreset} />
       )}
+      {dictionaryOpen && <DictionaryDialog />}
       <Toast />
     </div>
   );

@@ -1,6 +1,7 @@
 import type { CodecConfig } from '@deviceforge/core';
 import { TextCodecSchema } from '@deviceforge/core/schema';
 import { describe, expect, it } from 'vitest';
+import type { DictionaryRegistry } from '../../types';
 import {
   applyTemplateSuggestion,
   buildTemplateSuggestions,
@@ -54,24 +55,32 @@ const textCodec: CodecConfig = TextCodecSchema.parse({
       ],
     },
   ],
-  dictionaries: {
-    codes: {
-      '000': { name: '示例数值', unit: 'V' },
-      '089': { name: '示例状态', unit: 'mm', multi: true },
-      '220': {
-        name: '示例数组',
-        unit: 'Hz',
-        valueFormat: {
-          type: 'int16Array',
-          points: 1024,
-          endian: 'be',
-          encoding: 'hex',
-          crc: { algo: 'crc16-modbus', endian: 'le' },
+});
+
+const dictionaries: DictionaryRegistry = new Map([
+  [
+    'codes',
+    {
+      id: 'codes',
+      name: 'codes',
+      entries: {
+        '000': { name: '示例数值', unit: 'V' },
+        '089': { name: '示例状态', unit: 'mm', multi: true },
+        '220': {
+          name: '示例数组',
+          unit: 'Hz',
+          valueFormat: {
+            type: 'int16Array',
+            points: 1024,
+            endian: 'be',
+            encoding: 'hex',
+            crc: { algo: 'crc16-modbus', endian: 'le' },
+          },
         },
       },
     },
-  },
-});
+  ],
+]);
 
 const context: TemplateCompletionContext = {
   roots: ['req', 'state', 'counter', 'conn', 'device', 'now'],
@@ -260,6 +269,7 @@ describe('template suggestion catalog', () => {
     const textContext: TemplateCompletionContext = {
       ...context,
       codec: textCodec,
+      dictionaries,
     };
     const textLabels = labels('$req.', textContext);
     expect(textLabels).toEqual(
@@ -280,6 +290,7 @@ describe('template suggestion catalog', () => {
     const textContext: TemplateCompletionContext = {
       ...context,
       codec: textCodec,
+      dictionaries,
     };
     expect(labels('$req.data.', textContext)).toEqual(
       expect.arrayContaining([

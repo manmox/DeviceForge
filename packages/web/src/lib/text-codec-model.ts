@@ -7,6 +7,7 @@ import type {
   TextRepeat,
   TextSlot,
 } from '@deviceforge/core';
+import type { DictionaryRegistry } from '../types';
 
 export function isTextCodec(
   codec: CodecConfig | undefined,
@@ -107,18 +108,21 @@ export function findRepeatByMapField(
 }
 
 export function dictionaryOf(
-  codec: TextCodecConfig,
+  registry: DictionaryRegistry | undefined,
   repeat: TextRepeat,
 ): Record<string, TextDictionaryEntry> | undefined {
-  return repeat.dictionary ? codec.dictionaries?.[repeat.dictionary] : undefined;
+  const definition = repeat.dictionary
+    ? registry?.get(repeat.dictionary)
+    : undefined;
+  return definition?.entries;
 }
 
 export function dictionaryEntry(
-  codec: TextCodecConfig,
+  registry: DictionaryRegistry | undefined,
   repeat: TextRepeat,
   key: string,
 ): TextDictionaryEntry | undefined {
-  return dictionaryOf(codec, repeat)?.[key];
+  return dictionaryOf(registry, repeat)?.[key];
 }
 
 export function mapKeyFor(
@@ -158,10 +162,10 @@ export function defaultFieldValue(field: TextField): unknown {
 }
 
 function defaultRepeatItem(
-  codec: TextCodecConfig,
   repeat: TextRepeat,
+  registry?: DictionaryRegistry,
 ): Record<string, unknown> {
-  const dictionary = dictionaryOf(codec, repeat);
+  const dictionary = dictionaryOf(registry, repeat);
   const entries = dictionary
     ? Object.entries(dictionary).sort(([left], [right]) =>
         left.localeCompare(right),
@@ -190,13 +194,14 @@ function defaultRepeatItem(
 export function defaultFieldsForTextMessage(
   codec: TextCodecConfig,
   message: TextMessage,
+  registry?: DictionaryRegistry,
 ): Record<string, unknown> {
   const fields: Record<string, unknown> = { kind: message.name };
 
   for (const slot of message.slots) {
     if (slot.kind === 'literal') continue;
     if (slot.kind === 'repeat') {
-      fields[slot.name] = [defaultRepeatItem(codec, slot)];
+      fields[slot.name] = [defaultRepeatItem(slot, registry)];
       continue;
     }
     if (
@@ -215,9 +220,10 @@ export function defaultFieldsForTextMessage(
 
 export function defaultFieldsForTextCodec(
   codec: TextCodecConfig,
+  registry?: DictionaryRegistry,
 ): Record<string, unknown> {
   const message = codec.messages[0];
-  return message ? defaultFieldsForTextMessage(codec, message) : {};
+  return message ? defaultFieldsForTextMessage(codec, message, registry) : {};
 }
 
 export function slotSummary(slot: TextSlot): string {

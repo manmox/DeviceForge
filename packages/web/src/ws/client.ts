@@ -20,8 +20,14 @@ export function connectWs(): void {
     useAppStore.getState().setWsConnected(true);
 
     if (hasConnected) {
-      const { selectedId, refreshDevices, selectDevice } = useAppStore.getState();
+      const {
+        selectedId,
+        refreshDevices,
+        selectDevice,
+        loadDictionaries,
+      } = useAppStore.getState();
       void refreshDevices();
+      void loadDictionaries();
       if (selectedId) void selectDevice(selectedId);
     }
     hasConnected = true;

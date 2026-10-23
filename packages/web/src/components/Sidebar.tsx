@@ -1,4 +1,4 @@
-import { Cpu, Plus, Wifi, WifiOff, X } from 'lucide-react';
+import { BookOpen, Cpu, Plus, Wifi, WifiOff, X } from 'lucide-react';
 import {
   transportEndpoint,
   transportPresentation,
@@ -25,6 +25,10 @@ export function Sidebar({
   const selectDevice = useAppStore((state) => state.selectDevice);
   const wsConnected = useAppStore((state) => state.wsConnected);
   const initializing = useAppStore((state) => state.initializing);
+  const dictionaries = useAppStore((state) => state.dictionaries);
+  const openDictionaryManager = useAppStore(
+    (state) => state.openDictionaryManager,
+  );
 
   return (
     <>
@@ -60,10 +64,25 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="px-4 pb-3">
+        <div className="space-y-2 px-4 pb-3">
           <button className="btn btn-primary w-full" onClick={onNew}>
             <Plus className="h-4 w-4" />
             新建设备
+          </button>
+          <button
+            className="btn btn-outline w-full justify-between"
+            onClick={() => {
+              openDictionaryManager();
+              onClose();
+            }}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <BookOpen className="h-4 w-4" />
+              数据字典
+            </span>
+            <span className="text-[10.5px] text-mist-500">
+              {dictionaries.length}
+            </span>
           </button>
         </div>
 

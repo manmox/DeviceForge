@@ -6,6 +6,8 @@ import type {
   DeviceDetail,
   DeviceStatus,
   DeviceSummary,
+  DictionaryInput,
+  DictionarySummary,
   Preset,
   TrafficEvent,
   WsMessage,
@@ -25,6 +27,9 @@ interface AppState {
   device: DeviceDetail | null;
   detailLoading: boolean;
   presets: Preset[];
+  dictionaries: DictionarySummary[];
+  dictionariesLoading: boolean;
+  dictionaryDialog: { open: boolean; focusId: string | null };
   traffic: TrafficEvent[];
   connections: ConnectionInfo[];
   wsConnected: boolean;
@@ -37,6 +42,15 @@ interface AppState {
   createDevice: (config: DeviceConfig) => Promise<void>;
   updateDevice: (id: string, config: DeviceConfig) => Promise<void>;
   deleteDevice: (id: string) => Promise<void>;
+  loadDictionaries: () => Promise<void>;
+  openDictionaryManager: (focusId?: string) => void;
+  closeDictionaryManager: () => void;
+  createDictionary: (definition: DictionaryInput) => Promise<DictionarySummary>;
+  updateDictionary: (
+    id: string,
+    definition: DictionaryInput,
+  ) => Promise<DictionarySummary>;
+  deleteDictionary: (id: string) => Promise<void>;
   startDevice: (id: string) => Promise<void>;
   stopDevice: (id: string) => Promise<void>;
   restartDevice: (id: string) => Promise<void>;
@@ -92,6 +106,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   device: null,
   detailLoading: false,
   presets: [],
+  dictionaries: [],
+  dictionariesLoading: false,
+  dictionaryDialog: { open: false, focusId: null },
   traffic: [],
   connections: [],
   wsConnected: false,
@@ -103,6 +120,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const [devices, presets] = await Promise.all([api.listDevices(), api.listPresets()]);
       set({ devices, presets, initializing: false });
+      void get().loadDictionaries();
       const current = get().selectedId;
       const initialId = current ?? devices[0]?.config.id ?? null;
       if (initialId) await get().selectDevice(initialId);
@@ -200,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   createDevice: async (config) => {
     const summary = await api.createDevice(config);
     await get().refreshDevices();
+    void get().loadDictionaries();
     await get().selectDevice(summary.config.id);
     get().showToast(`设备「${summary.config.name}」已创建`, 'success');
   },
@@ -207,6 +226,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateDevice: async (id, config) => {
     await api.updateDevice(id, config);
     await get().refreshDevices();
+    void get().loadDictionaries();
     await get().selectDevice(id);
     get().showToast('设备配置已保存', 'success');
   },
@@ -220,10 +240,67 @@ export const useAppStore = create<AppState>((set, get) => ({
         await get().selectDevice(nextId);
       }
       await get().refreshDevices();
+      void get().loadDictionaries();
       get().showToast('设备已删除', 'success');
     } catch (error) {
       get().showToast(`删除失败：${errorText(error)}`, 'error');
     }
+  },
+
+  loadDictionaries: async () => {
+    set({ dictionariesLoading: true });
+    try {
+      const dictionaries = await api.listDictionaries();
+      set({ dictionaries });
+    } catch (error) {
+      get().showToast(`加载数据字典失败：${errorText(error)}`, 'error');
+    } finally {
+      set({ dictionariesLoading: false });
+    }
+  },
+
+  openDictionaryManager: (focusId) => {
+    set({ dictionaryDialog: { open: true, focusId: focusId ?? null } });
+    void get().loadDictionaries();
+  },
+
+  closeDictionaryManager: () => {
+    set({ dictionaryDialog: { open: false, focusId: null } });
+  },
+
+  createDictionary: async (definition) => {
+    const dictionary = await api.createDictionary(definition);
+    await get().loadDictionaries();
+    set({
+      dictionaryDialog: {
+        open: true,
+        focusId: dictionary.id,
+      },
+    });
+    get().showToast(`字典「${dictionary.name}」已创建`, 'success');
+    return dictionary;
+  },
+
+  updateDictionary: async (id, definition) => {
+    const dictionary = await api.updateDictionary(id, definition);
+    await get().loadDictionaries();
+    get().showToast(`字典「${dictionary.name}」已保存`, 'success');
+    return dictionary;
+  },
+
+  deleteDictionary: async (id) => {
+    await api.deleteDictionary(id);
+    await get().loadDictionaries();
+    set((state) => ({
+      dictionaryDialog: {
+        open: state.dictionaryDialog.open,
+        focusId:
+          state.dictionaryDialog.focusId === id
+            ? null
+            : state.dictionaryDialog.focusId,
+      },
+    }));
+    get().showToast('字典已删除', 'success');
   },
 
   startDevice: async (id) => {
@@ -409,6 +486,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       case 'devicesChanged': {
         void get().refreshDevices();
+        break;
+      }
+
+      case 'dictionariesChanged': {
+        void get().loadDictionaries();
         break;
       }
 

@@ -1,6 +1,7 @@
 import type { CodecConfig, FieldDef } from '@deviceforge/core';
 import { TextCodecSchema } from '@deviceforge/core/schema';
 import { describe, expect, it } from 'vitest';
+import type { DictionaryRegistry } from '../../types';
 import {
   codecFieldSuggestions,
   codecMatchFieldSuggestions,
@@ -60,13 +61,21 @@ const textCodec: CodecConfig = TextCodecSchema.parse({
       ],
     },
   ],
-  dictionaries: {
-    codes: {
-      '000': { name: '电压', unit: 'V' },
-      '001': { name: '电流', unit: 'A' },
-    },
-  },
 });
+
+const dictionaries: DictionaryRegistry = new Map([
+  [
+    'codes',
+    {
+      id: 'codes',
+      name: 'codes',
+      entries: {
+        '000': { name: '电压', unit: 'V' },
+        '001': { name: '电流', unit: 'A' },
+      },
+    },
+  ],
+]);
 
 describe('field type helpers', () => {
   it('classifies numeric and variable-length types', () => {
@@ -96,7 +105,7 @@ describe('defaultFieldsForCodec', () => {
   });
 
   it('uses the first text message and one dictionary sample group', () => {
-    expect(defaultFieldsForCodec(textCodec)).toEqual({
+    expect(defaultFieldsForCodec(textCodec, dictionaries)).toEqual({
       kind: 'report',
       deviceCode: 'value',
       count: 0,

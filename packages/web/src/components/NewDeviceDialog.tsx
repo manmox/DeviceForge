@@ -29,6 +29,9 @@ export function NewDeviceDialog({
   const presets = useAppStore((state) => state.presets);
   const devices = useAppStore((state) => state.devices);
   const createDevice = useAppStore((state) => state.createDevice);
+  const dictionaryDialogOpen = useAppStore(
+    (state) => state.dictionaryDialog.open,
+  );
 
   const initialConfig = useMemo(() => createBlankConfig(), []);
   const initialYaml = useMemo(
@@ -52,12 +55,12 @@ export function NewDeviceDialog({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || dictionaryDialogOpen) return;
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [dictionaryDialogOpen, onClose]);
 
   const candidateId =
     draft.mode === 'visual' ? draft.config.id : draft.validated?.id;

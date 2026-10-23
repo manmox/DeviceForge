@@ -1,6 +1,5 @@
 import type {
   TextCodecConfig,
-  TextDictionaryEntry,
   TextField,
   TextMatch,
   TextMessage,
@@ -18,15 +17,14 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
+import { useAppStore } from '../../store';
 import { useIssues, useIssueText } from '../form/ConfigIssuesContext';
 import {
   FormField,
   IconButton,
-  InlineWarning,
   NumberInput,
   SelectInput,
   SwitchRow,
-  TextArea,
   TextInput,
   type SelectOption,
 } from '../form/FormControls';
@@ -424,23 +422,45 @@ function RepeatEditor({
   onChange,
   path,
   countFields,
-  dictionaryNames,
   disabled,
 }: {
   repeat: TextRepeat;
   onChange: (next: TextRepeat) => void;
   path: string;
   countFields: string[];
-  dictionaryNames: string[];
   disabled: boolean;
 }) {
   const keyFieldId = useId();
   const valueFieldId = useId();
+  const dictionaries = useAppStore((state) => state.dictionaries);
+  const openDictionaryManager = useAppStore(
+    (state) => state.openDictionaryManager,
+  );
   const nameError = useIssueText(`${path}.name`);
   const countError = useIssueText(`${path}.countField`);
   const valueFieldError = useIssueText(`${path}.valueField`);
   const keyFieldError = useIssueText(`${path}.keyField`);
   const mapFieldError = useIssueText(`${path}.mapField`);
+  const dictionaryError = useIssueText(`${path}.dictionary`);
+  const dictionaryOptions = [
+    { value: '__none__', label: '不使用' },
+    ...dictionaries.map((dictionary) => ({
+      value: dictionary.id,
+      label:
+        dictionary.name === dictionary.id
+          ? dictionary.id
+          : `${dictionary.name} (${dictionary.id})`,
+    })),
+  ];
+  if (
+    repeat.dictionary &&
+    !dictionaries.some((dictionary) => dictionary.id === repeat.dictionary)
+  ) {
+    dictionaryOptions.push({
+      value: repeat.dictionary,
+      label: `${repeat.dictionary}（缺失）`,
+    });
+  }
 
   function patch(partial: Partial<TextRepeat>) {
     onChange({ ...repeat, ...partial });
@@ -539,15 +559,16 @@ function RepeatEditor({
           </datalist>
         </FormField>
 
-        <FormField label="数据字典">
+        <FormField
+          label="数据字典"
+          error={dictionaryError}
+          hint="全局字典只保存 ID；在“数据字典”中统一维护 entries。"
+        >
           <SelectInput<string>
-            value={repeat.dictionary ?? 'none'}
-            options={[
-              { value: 'none', label: '不使用' },
-              ...dictionaryNames.map((name) => ({ value: name, label: name })),
-            ]}
+            value={repeat.dictionary ?? '__none__'}
+            options={dictionaryOptions}
             onChange={(dictionary) => {
-              if (dictionary === 'none') {
+              if (dictionary === '__none__') {
                 const next = { ...repeat };
                 delete next.dictionary;
                 onChange(next);
@@ -558,6 +579,13 @@ function RepeatEditor({
             disabled={disabled}
             ariaLabel="repeat 数据字典"
           />
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm mt-1"
+            onClick={() => openDictionaryManager(repeat.dictionary)}
+          >
+            管理数据字典
+          </button>
         </FormField>
 
         <FormField label="字典键字段" hint="用哪个 item 字段查字典。" error={keyFieldError}>
@@ -649,7 +677,6 @@ function SlotCard({
   message,
   messageIndex,
   countFields,
-  dictionaryNames,
   onChange,
   onMove,
   onDuplicate,
@@ -661,7 +688,6 @@ function SlotCard({
   message: TextMessage;
   messageIndex: number;
   countFields: string[];
-  dictionaryNames: string[];
   onChange: (next: TextSlot) => void;
   onMove: (direction: -1 | 1) => void;
   onDuplicate: () => void;
@@ -754,7 +780,6 @@ function SlotCard({
             onChange={onChange}
             path={path}
             countFields={countFields}
-            dictionaryNames={dictionaryNames}
             disabled={disabled}
           />
         )}
@@ -884,7 +909,6 @@ function MessageCard({
   message,
   index,
   messages,
-  dictionaryNames,
   onChange,
   onMove,
   onDuplicate,
@@ -895,7 +919,6 @@ function MessageCard({
   message: TextMessage;
   index: number;
   messages: TextMessage[];
-  dictionaryNames: string[];
   onChange: (next: TextMessage) => void;
   onMove: (direction: -1 | 1) => void;
   onDuplicate: () => void;
@@ -1134,7 +1157,6 @@ function MessageCard({
               message={message}
               messageIndex={index}
               countFields={priorFields(slotIndex)}
-              dictionaryNames={dictionaryNames}
               onChange={(next) => updateSlot(slotIndex, next)}
               onMove={(direction) => moveSlot(slotIndex, direction)}
               onDuplicate={() => duplicateSlot(slotIndex)}
@@ -1144,76 +1166,6 @@ function MessageCard({
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-function DictionaryEditor({
-  codec,
-  onChange,
-  disabled,
-}: {
-  codec: TextCodecConfig;
-  onChange: (next: TextCodecConfig) => void;
-  disabled: boolean;
-}) {
-  const serialized = JSON.stringify(codec.dictionaries ?? {}, null, 2);
-  const [draft, setDraft] = useState(serialized);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!dirty) setDraft(serialized);
-  }, [serialized, dirty]);
-
-  function apply() {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(draft);
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : 'JSON 解析失败');
-      return;
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      setError('字典必须是“字典名 → 数据码 → 条目”的对象');
-      return;
-    }
-    const dictionaries = parsed as Record<string, Record<string, TextDictionaryEntry>>;
-    onChange({
-      ...codec,
-      dictionaries: Object.keys(dictionaries).length > 0 ? dictionaries : undefined,
-    });
-    setDirty(false);
-    setError(null);
-  }
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-ink-950/30 p-2.5">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-medium text-mist-200">数据字典</div>
-          <div className="mt-0.5 text-[10.5px] text-mist-500">
-            字典名 → 数据码 → name/unit/multi/valueFormat；大字典用 JSON 编辑。
-          </div>
-        </div>
-        <button type="button" className="btn btn-outline btn-sm" onClick={apply} disabled={disabled}>
-          应用字典
-        </button>
-      </div>
-      <TextArea
-        value={draft}
-        onChange={(value) => {
-          setDraft(value);
-          setDirty(true);
-          setError(null);
-        }}
-        rows={8}
-        className="font-mono"
-        placeholder='{\n  "codes": {\n    "000": { "name": "电压", "unit": "V" }\n  }\n}'
-        disabled={disabled}
-        ariaLabel="数据字典 JSON"
-      />
-      {error && <InlineWarning>{error}</InlineWarning>}
     </div>
   );
 }
@@ -1379,7 +1331,9 @@ export function TextCodecFields({
   const separatorError = useIssueText('codec.separator');
   const terminatorError = useIssueText('codec.terminator');
   const timezoneError = useIssueText('codec.timezone');
-  const dictionaryNames = Object.keys(codec.dictionaries ?? {});
+  const openDictionaryManager = useAppStore(
+    (state) => state.openDictionaryManager,
+  );
 
   function patch(partial: Partial<TextCodecConfig>) {
     onChange({ ...codec, ...partial });
@@ -1490,6 +1444,19 @@ export function TextCodecFields({
         disabled={disabled}
       />
 
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+        <div className="text-[10.5px] leading-4 text-mist-500">
+          数据字典是全局资源，设备配置只保存字典 ID；多个设备可以引用同一份码表。
+        </div>
+        <button
+          type="button"
+          className="btn btn-outline btn-sm"
+          onClick={() => openDictionaryManager()}
+        >
+          管理数据字典
+        </button>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-mist-400">报文定义</span>
         <button type="button" className="btn btn-outline btn-sm" onClick={addMessage} disabled={disabled}>
@@ -1505,7 +1472,6 @@ export function TextCodecFields({
             message={message}
             index={index}
             messages={codec.messages}
-            dictionaryNames={dictionaryNames}
             onChange={(next) => updateMessage(index, next)}
             onMove={(direction) => moveMessage(index, direction)}
             onDuplicate={() => duplicateMessage(index)}
@@ -1516,7 +1482,6 @@ export function TextCodecFields({
         ))}
       </div>
 
-      <DictionaryEditor codec={codec} onChange={onChange} disabled={disabled} />
       <SessionEditor codec={codec} onChange={onChange} disabled={disabled} />
 
       <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[10.5px] leading-4 text-mist-500">

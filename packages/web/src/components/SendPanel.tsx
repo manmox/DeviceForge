@@ -1,5 +1,6 @@
 import { Check, Send } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDictionaryRegistry } from '../hooks/useDictionaryRegistry';
 import { useJsonDraft } from '../hooks/useJsonDraft';
 import { codecFieldSuggestions, defaultFieldsForCodec } from '../lib/codec-fields';
 import { templateRootsFor } from '../lib/template-suggestions';
@@ -16,9 +17,10 @@ export function SendPanel() {
   const send = useAppStore((state) => state.send);
 
   const codec = device?.config.codec;
+  const dictionaries = useDictionaryRegistry();
   const baseline = useMemo(
-    () => (codec ? defaultFieldsForCodec(codec) : {}),
-    [codec],
+    () => (codec ? defaultFieldsForCodec(codec, dictionaries) : {}),
+    [codec, dictionaries],
   );
   const baselineKey = device
     ? `${device.config.id}:${JSON.stringify(device.config.codec)}`
@@ -32,6 +34,7 @@ export function SendPanel() {
     () => ({
       roots: templateRootsFor('manual-send'),
       codec: device?.config.codec,
+      dictionaries,
       state: device?.state ?? device?.config.state ?? {},
       deviceInfo: device?.config.deviceInfo,
     }),
@@ -40,6 +43,7 @@ export function SendPanel() {
       device?.config.deviceInfo,
       device?.state,
       device?.config.state,
+      dictionaries,
     ],
   );
 
@@ -54,8 +58,10 @@ export function SendPanel() {
     const id = device?.config.id ?? '';
     if (deviceIdRef.current === id) return;
     deviceIdRef.current = id;
-    if (device) draft.load(defaultFieldsForCodec(device.config.codec));
-  }, [device?.config.id, device?.config.codec, draft.load]);
+    if (device) {
+      draft.load(defaultFieldsForCodec(device.config.codec, dictionaries));
+    }
+  }, [device?.config.id, device?.config.codec, dictionaries, draft.load]);
 
   if (!device) return null;
 

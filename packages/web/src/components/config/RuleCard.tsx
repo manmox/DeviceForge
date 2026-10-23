@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useId, useMemo, type MouseEvent } from 'react';
+import { useDictionaryRegistry } from '../../hooks/useDictionaryRegistry';
 import { codecMatchFieldSuggestions, defaultFieldsForCodec } from '../../lib/codec-fields';
 import { ruleSummaryParts } from '../../lib/config-summary';
 import { templateRootsFor } from '../../lib/template-suggestions';
@@ -79,6 +80,7 @@ export function RuleCard({
   disabled?: boolean;
 }) {
   const issues = useIssues(`rules.${index}`);
+  const dictionaries = useDictionaryRegistry();
   const bodyId = useId();
   const trigger = ruleTrigger(rule);
   const stateKeySuggestions = useMemo(
@@ -89,19 +91,21 @@ export function RuleCard({
     () => ({
       roots: templateRootsFor('rule-set', trigger),
       codec,
+      dictionaries,
       state,
       deviceInfo,
     }),
-    [trigger, codec, state, deviceInfo],
+    [trigger, codec, dictionaries, state, deviceInfo],
   );
   const sendCompletion = useMemo(
     () => ({
       roots: templateRootsFor('rule-send', trigger),
       codec,
+      dictionaries,
       state,
       deviceInfo,
     }),
-    [trigger, codec, state, deviceInfo],
+    [trigger, codec, dictionaries, state, deviceInfo],
   );
   const summaryParts = ruleSummaryParts(rule);
   if (summaryParts[0] === RULE_TRIGGER_LABELS[trigger]) summaryParts.shift();
@@ -140,7 +144,7 @@ export function RuleCard({
 
   function newMessage(): OutgoingMessage {
     if (codec.type === 'raw') return { hex: '' };
-    return { fields: defaultFieldsForCodec(codec) };
+    return { fields: defaultFieldsForCodec(codec, dictionaries) };
   }
 
   function updateMessage(messageIndex: number, message: OutgoingMessage) {
@@ -404,6 +408,7 @@ export function RuleCard({
                       message={message}
                       onChange={(next) => updateMessage(messageIndex, next)}
                       codec={codec}
+                      dictionaries={dictionaries}
                       templateContext={sendCompletion}
                       path={`rules.${index}.send${
                         messages.length > 1 ? `.${messageIndex}` : ''

@@ -1,4 +1,5 @@
 import type { CodecConfig, FieldDef } from '@deviceforge/core';
+import type { DictionaryRegistry } from '../types';
 import {
   allTopLevelFields,
   allTopLevelNames,
@@ -45,12 +46,15 @@ export function fieldNeedsLength(type: FieldDef['type']): boolean {
   return LENGTH_FIELD_TYPES.has(type);
 }
 
-export function defaultFieldsForCodec(codec: CodecConfig): Record<string, unknown> {
+export function defaultFieldsForCodec(
+  codec: CodecConfig,
+  registry?: DictionaryRegistry,
+): Record<string, unknown> {
   if (codec.type === 'raw') {
     return { hex: '' };
   }
   if (codec.type === 'text') {
-    return defaultFieldsForTextCodec(codec);
+    return defaultFieldsForTextCodec(codec, registry);
   }
 
   const values: Record<string, unknown> = {};

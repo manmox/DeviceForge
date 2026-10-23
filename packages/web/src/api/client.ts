@@ -4,6 +4,8 @@ import type {
   DeviceDetail,
   DeviceStatus,
   DeviceSummary,
+  DictionaryInput,
+  DictionarySummary,
   Preset,
   TrafficEvent,
   ValidationIssue,
@@ -149,6 +151,33 @@ export const api = {
 
   listPresets: () =>
     request<{ presets: Preset[] }>('/api/presets').then((result) => result.presets),
+
+  listDictionaries: () =>
+    request<{ dictionaries: DictionarySummary[] }>('/api/dictionaries').then(
+      (result) => result.dictionaries,
+    ),
+
+  getDictionary: (id: string) =>
+    request<{ dictionary: DictionarySummary }>(
+      `/api/dictionaries/${encodeURIComponent(id)}`,
+    ).then((result) => result.dictionary),
+
+  createDictionary: (definition: DictionaryInput) =>
+    request<{ dictionary: DictionarySummary }>('/api/dictionaries', {
+      method: 'POST',
+      body: JSON.stringify(definition),
+    }).then((result) => result.dictionary),
+
+  updateDictionary: (id: string, definition: DictionaryInput) =>
+    request<{ dictionary: DictionarySummary }>(
+      `/api/dictionaries/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(definition) },
+    ).then((result) => result.dictionary),
+
+  deleteDictionary: (id: string) =>
+    request<void>(`/api/dictionaries/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 
   validateYaml: (yaml: string) =>
     request<{ config: DeviceConfig }>('/api/config/validate', {
