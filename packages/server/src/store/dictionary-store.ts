@@ -13,6 +13,9 @@ import {
   type GlobalDictionaryDefinition,
 } from '@deviceforge/core';
 import { z } from 'zod';
+import type { DictionaryRepository } from '../application/contracts';
+
+export type { DictionaryRepository } from '../application/contracts';
 
 const StoreFileSchema = z.object({
   version: z.number().int().default(1),
@@ -27,14 +30,6 @@ export class DictionaryStoreError extends Error {
     super(message);
     this.name = 'DictionaryStoreError';
   }
-}
-
-/** DeviceStore 启动迁移只需要读取现有定义和导入新定义。 */
-export interface DictionaryRepository {
-  list(): GlobalDictionaryDefinition[];
-  importDefinitions(
-    definitions: Iterable<GlobalDictionaryDefinition>,
-  ): GlobalDictionaryDefinition[];
 }
 
 function byId(

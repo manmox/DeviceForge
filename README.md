@@ -55,6 +55,21 @@ pnpm start
 
 打开 <http://127.0.0.1:7321>。
 
+## MCP 接口
+
+服务端同时启动本机 MCP Streamable HTTP 接口，默认地址为 <http://127.0.0.1:7322/mcp>。MCP 固定监听 `127.0.0.1`，可用 `DEVICEFORGE_MCP_PORT` 修改端口。接口没有单独的认证层，不应通过反向代理或端口转发暴露到其他设备。
+
+可用工具按能力分组：
+
+- **项目文件**：`project_list_files`、`project_search_files`、`project_read_file`。路径以仓库根目录为边界；可读取仓库内所有文件，包括 Git 忽略的 `data/` 文件。越界路径和指向仓库外的符号链接会被拒绝。
+- **设备配置**：`devices_list`、`devices_get`、`devices_list_presets`、`devices_validate_config`、`devices_create_from_yaml`、`devices_update_from_yaml`。配置创建和更新共用 REST API 的校验及字典迁移规则；创建设备后不会自动启动，更新运行中的设备会被拒绝。
+- **设备运行**：`runtime_start`、`runtime_stop`、`runtime_restart`、`runtime_send`、`runtime_disconnect`。
+- **流量记录**：`traffic_query`，可按方向和起始时间筛选内存中的收发及系统事件。
+
+MCP 不提供删除设备或清空流量记录的工具。文件读取单次最多 2 MiB；搜索最多扫描 2000 个文件，并最多返回 500 处匹配。
+
+仓库内本地运行文件可能含有明文凭据，例如 `data/devices.json` 中的 MQTT 密码。MCP 文件读取工具会原样返回文件内容，连接 MCP 的 agent 因而也能读取这些凭据。仅在可信的本机开发环境中启用该服务。
+
 ## 5 分钟演示
 
 1. 点击「新建设备」→ 选择「厂商温湿度传感器」→「校验配置」→「创建设备」。
@@ -463,7 +478,7 @@ match:
 
 ```text
 packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP 与 MQTT transport
-packages/server    Fastify REST + WebSocket + JSON 持久化 + 静态托管
+packages/server    Fastify REST + WebSocket + MCP 传输/能力模块 + 应用服务 + JSON 持久化 + 静态托管
 packages/web       React + Vite + Tailwind 控制台
 presets/           内置 YAML 预设
 data/              本机运行数据（devices.json、dictionaries.json，gitignored）
@@ -477,7 +492,7 @@ packages/core/src/__tests__/  单元测试和 TCP 集成测试
 
 ```bash
 pnpm -r typecheck    # 三个包的类型检查
-pnpm test            # 核心 + 服务端存储/迁移 + Web 纯函数测试
+pnpm test            # 核心 + 服务端应用服务/MCP + Web 测试
 pnpm build           # 类型检查 + 构建前端
 pnpm dev             # server + Vite
 pnpm start           # 生产模式（需要先 build）
@@ -492,6 +507,8 @@ pnpm start           # 生产模式（需要先 build）
 - 通用 `text` codec：prefix/suffix/match、optional 字段、自动时间戳/流水号、repeat/字典/mapField、pattern 警告和异常帧
 - 全局数据字典：schema/ID 校验、引用收集、内联字典迁移、已有字典匹配、ID 冲突、无效数据保留、运行时实时 provider
 - 服务端字典仓库与设备存储：本机字典加载与 CRUD、损坏备份、启动迁移、备份文件、幂等和跨设备前向引用
+- MCP：Streamable HTTP 握手与关闭、工具注册及参数校验、设备运行控制、收发记录筛选、项目路径越界和外部符号链接拒绝
+- 设备配置应用服务：REST/MCP 共用 YAML 校验与写入、字典迁移、重复 ID、运行中更新拒绝和预设排序
 - 文本 codec：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
 - ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP/MQTT Client 暂停与重连恢复、TCP Server/MQTT Broker 断连丢弃、stop 清理
 - 数组字段：int16 BE、CRC16/Modbus 已知向量、hex/base64 round-trip、CRC 失败丢弃、CRC 字节序
@@ -511,6 +528,7 @@ pnpm start           # 生产模式（需要先 build）
 | --- | --- | --- |
 | `DEVICEFORGE_PORT` | `7321` | 控制面端口 |
 | `DEVICEFORGE_HOST` | `127.0.0.1` | 控制面绑定地址 |
+| `DEVICEFORGE_MCP_PORT` | `7322` | 本机 MCP Streamable HTTP 端口，固定绑定 `127.0.0.1` |
 | `DEVICEFORGE_DATA_DIR` | `<repo>/data` | 设备配置和本机自定义字典存储目录 |
 | `LOG_LEVEL` | `info` | Fastify/Pino 日志级别 |
 

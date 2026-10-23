@@ -3,10 +3,15 @@ import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import { ZodError } from 'zod';
-import { control, paths } from './config';
+import { DeviceConfigApplicationService } from './application/device-config-service';
+import { PresetApplicationService } from './application/preset-service';
+import { ProjectFileApplicationService } from './application/project-file-service';
+import { control, mcp, paths } from './config';
 import { registerConfigRoutes } from './routes/config';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerDictionaryRoutes } from './routes/dictionaries';
+import { createMcpCapabilities } from './mcp/create-capabilities';
+import { startMcpHttpServer, type McpHttpServer } from './mcp/http-transport';
 import { RuntimeManager } from './runtime-manager';
 import { DeviceStore } from './store/device-store';
 import { DictionaryStore } from './store/dictionary-store';
@@ -20,6 +25,8 @@ async function main(): Promise<void> {
   const dictionaries = new DictionaryStore(paths.dictionariesFile);
   const store = new DeviceStore(paths.devicesFile, dictionaries);
   const manager = new RuntimeManager(store, dictionaries.provider());
+  const deviceConfigs = new DeviceConfigApplicationService(manager, dictionaries);
+  const presets = new PresetApplicationService(paths.presetsDir, dictionaries);
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -52,8 +59,8 @@ async function main(): Promise<void> {
     await app.register(fastifyStatic, { root: paths.webDist, prefix: '/' });
   }
 
-  await registerConfigRoutes(app, dictionaries);
-  await registerDeviceRoutes(app, manager, dictionaries);
+  await registerConfigRoutes(app, deviceConfigs, presets);
+  await registerDeviceRoutes(app, manager, deviceConfigs);
   await registerDictionaryRoutes(app, dictionaries, store);
 
   app.setNotFoundHandler((request, reply) => {
@@ -86,7 +93,23 @@ async function main(): Promise<void> {
   manager.onState((event) => hub.state(event));
   manager.onDevicesChanged(() => hub.devicesChanged());
 
+  const mcpCapabilities = createMcpCapabilities({
+    projectFiles: new ProjectFileApplicationService(paths.repoRoot),
+    deviceConfigs,
+    presets,
+    runtimeManager: manager,
+  });
+  let mcpServer: McpHttpServer;
+  try {
+    mcpServer = await startMcpHttpServer(mcpCapabilities, mcp.port);
+  } catch (error) {
+    hub.close();
+    await app.close();
+    throw error;
+  }
+
   app.log.info(`DeviceForge 控制台已启动: http://${control.host}:${control.port}`);
+  app.log.info(`DeviceForge MCP 服务已启动: ${mcpServer.address}`);
   if (!webBuilt) {
     app.log.info('前端开发地址: http://127.0.0.1:5173');
   }
@@ -98,6 +121,7 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     app.log.info(`收到 ${signal}，正在关闭 DeviceForge...`);
+    await mcpServer.close();
     await manager.stopAll();
     hub.close();
     await app.close();
