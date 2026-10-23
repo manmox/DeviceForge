@@ -14,6 +14,7 @@ export interface ProtocolSendContext {
   attempt: number;
   maxRetries: number;
   reason: 'retry' | 'reconnect';
+  topic?: string;
 }
 
 export type ProtocolNoticeLevel = 'info' | 'warning' | 'error';
@@ -47,6 +48,7 @@ interface PendingDelivery {
   timer?: ReturnType<typeof setTimeout>;
   paused: boolean;
   busy: boolean;
+  topic?: string;
   /** 断线恢复期间若发送仍在进行，等它结束后再迁移。 */
   resumeConnectionId?: string;
 }
@@ -88,6 +90,7 @@ export class ProtocolSession {
     connectionId: string,
     track: ProtocolTrack,
     data: Buffer,
+    topic?: string,
   ): PendingHandle {
     const handle: PendingHandle = {
       connectionId,
@@ -115,6 +118,7 @@ export class ProtocolSession {
       attempts: 0,
       paused: false,
       busy: false,
+      topic,
     });
     return handle;
   }
@@ -160,7 +164,7 @@ export class ProtocolSession {
   onConnectionClosed(connectionId: string): void {
     if (this.stopped) return;
 
-    if (this.options.mode === 'tcp-server') {
+    if (this.options.mode === 'tcp-server' || this.options.mode === 'mqtt-broker') {
       const entries = [...this.pending.values()].filter(
         (entry) => entry.connectionId === connectionId,
       );
@@ -181,7 +185,7 @@ export class ProtocolSession {
   onTransportStatus(status: TransportStatus): void {
     if (this.stopped) return;
 
-    if (this.options.mode === 'tcp-client') {
+    if (this.options.mode === 'tcp-client' || this.options.mode === 'mqtt-client') {
       if (status.state === 'reconnecting') {
         this.pauseAll();
         return;
@@ -206,7 +210,7 @@ export class ProtocolSession {
    * 在 connect 规则中新发送的报文有自己的定时器，不会在这里重复发送。
    */
   onConnectionReady(connectionId: string): void {
-    if (this.stopped || this.options.mode !== 'tcp-client') return;
+    if (this.stopped || (this.options.mode !== 'tcp-client' && this.options.mode !== 'mqtt-client')) return;
     void this.resumePaused(connectionId);
   }
 
@@ -273,12 +277,13 @@ export class ProtocolSession {
         attempt: entry.attempts,
         maxRetries: entry.maxRetries,
         reason,
+        topic: entry.topic,
       });
     } catch (error) {
       entry.busy = false;
       if (this.pending.get(entryKey(entry)) !== entry) return;
 
-      if (this.options.mode === 'tcp-client') {
+      if (this.options.mode === 'tcp-client' || this.options.mode === 'mqtt-client') {
         entry.paused = true;
         this.options.notify(
           'warning',
@@ -406,6 +411,7 @@ export class ProtocolSession {
         attempt: entry.attempts,
         maxRetries: entry.maxRetries,
         reason: 'reconnect',
+        topic: entry.topic,
       });
     } catch (error) {
       entry.busy = false;

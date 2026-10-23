@@ -157,6 +157,91 @@ describe('DeviceConfigSchema transports', () => {
       expect(result.error.issues[0]?.path).toEqual(item.path);
     }
   });
+
+  it('applies MQTT defaults and accepts client and broker settings', () => {
+    const client = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      transport: { type: 'mqtt-client' },
+    });
+    expect(client.transport).toMatchObject({
+      type: 'mqtt-client',
+      url: 'mqtt://127.0.0.1:1883',
+      subscriptions: [],
+      publishTopic: 'deviceforge/device/up',
+      publishQos: 0,
+    });
+
+    const broker = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      transport: { type: 'mqtt-broker' },
+    });
+    expect(broker.transport).toMatchObject({
+      type: 'mqtt-broker',
+      host: '127.0.0.1',
+      port: 1883,
+      publishTopic: 'deviceforge/device/down',
+      publishQos: 0,
+    });
+  });
+
+  it('rejects unsupported MQTT URLs, QoS, credential pairs and TLS pairs', () => {
+    const invalidConfigs = [
+      { type: 'mqtt-client', url: 'http://broker.local' },
+      { type: 'mqtt-client', url: 'mqtt://broker.local:0' },
+      { type: 'mqtt-client', url: 'not a url', caFile: '/tmp/ca.pem' },
+      { type: 'mqtt-client', url: 'mqtt://broker.local', caFile: '/tmp/ca.pem' },
+      { type: 'mqtt-client', username: 'user' },
+      { type: 'mqtt-client', publishQos: 2 },
+      {
+        type: 'mqtt-client',
+        subscriptions: [{ topic: 'devices/#/state' }],
+      },
+      { type: 'mqtt-broker', password: 'secret' },
+      { type: 'mqtt-broker', certFile: '/tmp/cert.pem' },
+      { type: 'mqtt-broker', publishQos: 2 },
+    ];
+    for (const transport of invalidConfigs) {
+      expect(
+        DeviceConfigSchema.safeParse({ ...baseConfig(), transport }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('限制 MQTT 主题规则字段的传输和触发方式', () => {
+    const mqtt = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      transport: { type: 'mqtt-client' },
+      rules: [
+        {
+          on: 'frame',
+          topicFilter: 'sensors/+/state',
+          publishTopic: 'reply/${mqtt.topic}',
+        },
+      ],
+    });
+    expect(mqtt.rules[0]).toMatchObject({
+      topicFilter: 'sensors/+/state',
+      publishTopic: 'reply/${mqtt.topic}',
+    });
+
+    for (const rule of [
+      { every: 1000, topicFilter: 'sensors/#' },
+      { on: 'frame', topicFilter: 'sensors/#' },
+    ]) {
+      const result = DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        rules: [rule],
+      });
+      expect(result.success).toBe(false);
+    }
+
+    expect(
+      DeviceConfigSchema.safeParse({
+        ...baseConfig(),
+        rules: [{ on: 'frame', publishTopic: 'reply/topic' }],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('DeviceConfigSchema text codec', () => {

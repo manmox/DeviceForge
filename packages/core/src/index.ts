@@ -11,3 +11,4 @@ export * from './runtime/event-bus';
 export * from './runtime/traffic-buffer';
 export * from './transport';
 export * from './transport/types';
+export * from './common/mqtt-topic';

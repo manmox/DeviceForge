@@ -17,7 +17,9 @@ interface Notice {
   connectionId?: string;
 }
 
-function setup(mode: 'tcp-client' | 'tcp-server' = 'tcp-client') {
+function setup(
+  mode: 'tcp-client' | 'tcp-server' | 'mqtt-client' | 'mqtt-broker' = 'tcp-client',
+) {
   const sent: SentFrame[] = [];
   const notices: Notice[] = [];
   const session = new ProtocolSession({
@@ -140,6 +142,25 @@ describe('ProtocolSession', () => {
     expect(session.pendingCount).toBe(0);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(sent).toHaveLength(2);
+  });
+
+  it('在 MQTT ACK 重试中保留规则覆盖主题', async () => {
+    const { session, sent } = setup('mqtt-client');
+    const handle = session.register('mqtt-1', track, frame, 'reply/custom');
+    session.arm(handle);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent[0]?.context.topic).toBe('reply/custom');
+    session.stop();
+  });
+
+  it('Broker 客户端断开时清除该连接的待确认报文', () => {
+    const { session } = setup('mqtt-broker');
+    const handle = session.register('mqtt-client-1', track, frame, 'reply/custom');
+    session.arm(handle);
+    session.onConnectionClosed('mqtt-client-1');
+    expect(session.pendingCount).toBe(0);
+    session.stop();
   });
 
   it('does not resend entries created during connect rules', async () => {

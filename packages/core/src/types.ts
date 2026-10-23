@@ -1,5 +1,15 @@
 import { z } from 'zod';
+import { MqttQosSchema } from './schema/device';
 import type { TransportConfig } from './schema/device';
+
+export const MqttMessageMetadataSchema = z.object({
+  topic: z.string(),
+  qos: MqttQosSchema,
+  retain: z.boolean(),
+  clientId: z.string().optional(),
+});
+
+export type MqttMessageMetadata = z.infer<typeof MqttMessageMetadataSchema>;
 
 export const ConnectionInfoSchema = z.object({
   id: z.string(),
@@ -8,6 +18,7 @@ export const ConnectionInfoSchema = z.object({
   connectedAt: z.number(),
   rxBytes: z.number().int(),
   txBytes: z.number().int(),
+  clientId: z.string().optional(),
 });
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>;
@@ -33,6 +44,7 @@ export const TrafficEventSchema = z.object({
   rule: z.string().optional(),
   note: z.string().optional(),
   error: z.string().optional(),
+  mqtt: MqttMessageMetadataSchema.optional(),
 });
 
 export type TrafficEvent = z.infer<typeof TrafficEventSchema>;

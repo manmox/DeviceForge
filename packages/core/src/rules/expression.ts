@@ -10,12 +10,18 @@ export interface TemplateContext {
   state: Record<string, unknown>;
   counters: Record<string, number>;
   conn?: ConnectionInfo;
+  mqtt?: {
+    topic: string;
+    qos: 0 | 1;
+    retain: boolean;
+    clientId?: string;
+  };
   device?: DeviceInfo;
   now: number;
 }
 
 const FUNCTION_MAP = new Map(TEMPLATE_FUNCTIONS.map((fn) => [fn.name, fn]));
-const ROOTS = new Set(['req', 'state', 'counter', 'conn', 'device', 'now']);
+const ROOTS = new Set(['req', 'state', 'counter', 'conn', 'device', 'mqtt', 'now']);
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const MAX_EXPRESSION_LENGTH = 2048;
@@ -502,6 +508,9 @@ function resolvePath(parts: string[], context: TemplateContext): unknown {
       break;
     case 'device':
       current = context.device;
+      break;
+    case 'mqtt':
+      current = context.mqtt;
       break;
   }
 

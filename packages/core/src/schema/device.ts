@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  isValidMqttTopicFilter,
+  isValidMqttTopicName,
+} from '../common/mqtt-topic';
 import { EndianSchema } from './common';
 import { DictionaryIdSchema } from './dictionary';
 
@@ -42,9 +46,120 @@ export const TcpClientTransportSchema = z.object({
   reconnect: ReconnectConfigSchema.default({ ...DEFAULT_RECONNECT_CONFIG }),
 });
 
+export const MqttQosSchema = z.union([z.literal(0), z.literal(1)]);
+
+export const MqttSubscriptionSchema = z.object({
+  topic: z
+    .string()
+    .min(1, '订阅主题不能为空')
+    .refine(isValidMqttTopicFilter, 'MQTT 主题过滤器中的 + 和 # 用法无效'),
+  qos: MqttQosSchema.default(0),
+});
+
+const MqttUrlSchema = z.string().url().superRefine((value, ctx) => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    ctx.addIssue({ code: 'custom', message: 'MQTT 地址格式无效' });
+    return;
+  }
+
+  if (url.protocol !== 'mqtt:' && url.protocol !== 'mqtts:') {
+    ctx.addIssue({ code: 'custom', message: '仅支持 mqtt:// 和 mqtts:// 地址' });
+  }
+  if (!url.hostname) {
+    ctx.addIssue({ code: 'custom', message: 'MQTT 地址必须包含主机名' });
+  }
+  if (url.port === '0') {
+    ctx.addIssue({ code: 'custom', path: ['port'], message: 'MQTT 端口必须为 1-65535' });
+  }
+  if (url.username || url.password) {
+    ctx.addIssue({ code: 'custom', message: '账号密码请填写独立字段，不要嵌入地址' });
+  }
+  if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) {
+    ctx.addIssue({ code: 'custom', message: 'MQTT 地址不支持路径、查询参数或片段' });
+  }
+});
+
+function checkCredentialPair(
+  value: { username?: string; password?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (Boolean(value.username) !== Boolean(value.password)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [value.username ? 'password' : 'username'],
+      message: '账号和密码必须同时填写',
+    });
+  }
+}
+
+export const MqttClientTransportSchema = z
+  .object({
+    type: z.literal('mqtt-client'),
+    url: MqttUrlSchema.default('mqtt://127.0.0.1:1883'),
+    clientId: z.string().optional(),
+    username: z.string().min(1).optional(),
+    password: z.string().min(1).optional(),
+    caFile: z.string().min(1).optional(),
+    subscriptions: z.array(MqttSubscriptionSchema).default([]),
+    publishTopic: z
+      .string()
+      .min(1)
+      .default('deviceforge/device/up')
+      .refine(isValidMqttTopicName, '发布主题不能包含 + 或 #'),
+    publishQos: MqttQosSchema.default(0),
+  })
+  .superRefine((value, ctx) => {
+    checkCredentialPair(value, ctx);
+    let isSecureUrl = false;
+    try {
+      isSecureUrl = new URL(value.url).protocol === 'mqtts:';
+    } catch {
+      // MqttUrlSchema 已经报告地址格式错误。
+    }
+    if (value.caFile && !isSecureUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['caFile'],
+        message: 'CA 文件只适用于 mqtts:// 地址',
+      });
+    }
+  });
+
+export const MqttBrokerTransportSchema = z
+  .object({
+    type: z.literal('mqtt-broker'),
+    host: HostSchema,
+    port: PortSchema.default(1883),
+    username: z.string().min(1).optional(),
+    password: z.string().min(1).optional(),
+    certFile: z.string().min(1).optional(),
+    keyFile: z.string().min(1).optional(),
+    publishTopic: z
+      .string()
+      .min(1)
+      .default('deviceforge/device/down')
+      .refine(isValidMqttTopicName, '发布主题不能包含 + 或 #'),
+    publishQos: MqttQosSchema.default(0),
+  })
+  .superRefine((value, ctx) => {
+    checkCredentialPair(value, ctx);
+    if (Boolean(value.certFile) !== Boolean(value.keyFile)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [value.certFile ? 'keyFile' : 'certFile'],
+        message: '证书和私钥文件必须同时填写',
+      });
+    }
+  });
+
 export const TransportSchema = z.discriminatedUnion('type', [
   TcpServerTransportSchema,
   TcpClientTransportSchema,
+  MqttClientTransportSchema,
+  MqttBrokerTransportSchema,
 ]);
 
 export const LengthFieldSchema = z.object({
@@ -754,6 +869,15 @@ export const RuleSchema = z
     enabled: z.boolean().default(true),
     on: z.enum(['start', 'connect', 'frame']).optional(),
     match: z.record(z.string(), MatchValueSchema).optional(),
+    topicFilter: z
+      .string()
+      .min(1)
+      .refine(isValidMqttTopicFilter, 'MQTT 主题过滤器中的 + 和 # 用法无效')
+      .optional(),
+    publishTopic: z
+      .string()
+      .min(1)
+      .optional(),
     every: z.number().int().min(10).optional(),
     jitter: z.number().int().min(0).default(0),
     target: z.enum(['all', 'last']).default('all'),
@@ -783,6 +907,16 @@ export const RuleSchema = z
         path: ['match'],
       });
     }
+    if (
+      rule.topicFilter !== undefined &&
+      (rule.every !== undefined || (rule.on !== undefined && rule.on !== 'frame'))
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['topicFilter'],
+        message: '主题过滤条件仅适用于收到 MQTT 消息时触发的规则',
+      });
+    }
   });
 
 export const DeviceInfoSchema = z.object({
@@ -808,10 +942,36 @@ export const DeviceConfigSchema = z.object({
   state: z.record(z.string(), z.unknown()).default({}),
   rules: z.array(RuleSchema).default([]),
   autoStart: z.boolean().default(false),
+}).superRefine((config, ctx) => {
+  const isMqtt =
+    config.transport.type === 'mqtt-client' ||
+    config.transport.type === 'mqtt-broker';
+  if (isMqtt) return;
+
+  config.rules.forEach((rule, index) => {
+    if (rule.topicFilter !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rules', index, 'topicFilter'],
+        message: '主题过滤条件仅适用于 MQTT 传输',
+      });
+    }
+    if (rule.publishTopic !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rules', index, 'publishTopic'],
+        message: '规则发布主题仅适用于 MQTT 传输',
+      });
+    }
+  });
 });
 
 export type TcpServerTransport = z.infer<typeof TcpServerTransportSchema>;
 export type TcpClientTransport = z.infer<typeof TcpClientTransportSchema>;
+export type MqttClientTransport = z.infer<typeof MqttClientTransportSchema>;
+export type MqttBrokerTransport = z.infer<typeof MqttBrokerTransportSchema>;
+export type MqttSubscription = z.infer<typeof MqttSubscriptionSchema>;
+export type MqttQos = z.infer<typeof MqttQosSchema>;
 export type ReconnectConfig = z.infer<typeof ReconnectConfigSchema>;
 export type TransportConfig = z.infer<typeof TransportSchema>;
 export type FramingConfig = z.infer<typeof FramingSchema>;

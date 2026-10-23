@@ -3,7 +3,8 @@ import { createCodec, tryDecode, type Codec } from '../codec';
 import type { DictionaryProvider } from '../dictionary/provider';
 import { createFramer, type FrameDecoder } from '../framing';
 import { matchesFields } from '../rules/matcher';
-import { evaluateFields, type TemplateContext } from '../rules/template';
+import { evaluate, evaluateFields, type TemplateContext } from '../rules/template';
+import { mqttTopicMatchesFilter } from '../common/mqtt-topic';
 import type { DeviceConfig, OutgoingMessage, Rule } from '../schema/device';
 import { createTransport } from '../transport';
 import type { TransportAdapter } from '../transport/types';
@@ -11,6 +12,7 @@ import type {
   ConnectionInfo,
   Counters,
   DeviceStatus,
+  MqttMessageMetadata,
   TransportStatus,
   TrafficEvent,
 } from '../types';
@@ -35,6 +37,8 @@ export interface SendOptions {
   target?: 'all' | 'last';
   req?: Record<string, unknown>;
   rule?: string;
+  publishTopic?: string;
+  mqtt?: MqttMessageMetadata;
   silentIfNoConnection?: boolean;
 }
 
@@ -154,12 +158,12 @@ export class DeviceRuntime {
       transport: idleTransportStatus(this._config),
     });
     try {
-      const transport = createTransport(this._config.transport);
+      const transport = createTransport(this._config.transport, this._config.id);
       this.transport = transport;
       const isCurrent = () => this.transport === transport;
       await transport.start({
-        onData: (connectionId, data) => {
-          if (isCurrent()) this.handleData(connectionId, data);
+        onData: (connectionId, data, metadata) => {
+          if (isCurrent()) this.handleData(connectionId, data, metadata);
         },
         onConnect: (connection) => {
           if (isCurrent()) this.handleConnect(connection);
@@ -279,9 +283,12 @@ export class DeviceRuntime {
 
     const connections = transport.connections();
     const byId = new Map(connections.map((connection) => [connection.id, connection]));
+    const isMqttBroker = transport.kind === 'mqtt-broker';
     let targetIds: string[];
 
-    if (options.connectionId) {
+    if (isMqttBroker) {
+      targetIds = [options.connectionId ?? ''];
+    } else if (options.connectionId) {
       if (!byId.has(options.connectionId)) throw new Error('指定的连接已断开');
       targetIds = [options.connectionId];
     } else if ((options.target ?? 'all') === 'last') {
@@ -301,14 +308,14 @@ export class DeviceRuntime {
     const prepared =
       this.codec.prepareOutbound?.(
         message,
-        this.templateContext(undefined, options.req),
+        this.templateContext(undefined, options.req, options.mqtt),
       ) ?? { message };
 
     for (const connectionId of targetIds) {
       const connection = byId.get(connectionId);
-      if (!connection) continue;
+      if (!connection && !isMqttBroker) continue;
 
-      const templateContext = this.templateContext(connectionId, options.req);
+      const templateContext = this.templateContext(connectionId, options.req, options.mqtt);
       const resolvedFields = prepared.message.fields
         ? evaluateFields(prepared.message.fields, templateContext)
         : undefined;
@@ -335,11 +342,13 @@ export class DeviceRuntime {
         String(decoded.fields[prepared.track.field] ?? '') ===
           prepared.track.key;
       const pending: PendingHandle | undefined = trackable
-        ? this.protocolSession.register(connectionId, prepared.track!, data)
+        ? connectionId
+          ? this.protocolSession.register(connectionId, prepared.track!, data, options.publishTopic)
+          : undefined
         : undefined;
 
       try {
-        await transport.send(connectionId, data);
+        await transport.send(connectionId, data, { topic: options.publishTopic });
         if (pending) this.protocolSession.arm(pending);
       } catch (error) {
         if (pending) this.protocolSession.cancel(pending);
@@ -353,7 +362,7 @@ export class DeviceRuntime {
       this.pushTraffic({
         id: randomUUID(),
         deviceId: this.id,
-        connectionId,
+        connectionId: connectionId || undefined,
         ts: Date.now(),
         direction: 'out',
         data: data.toString('hex'),
@@ -361,6 +370,7 @@ export class DeviceRuntime {
         decoded: decoded?.fields,
         rule: options.rule,
         error: decoded && !decoded.valid ? decoded.error : undefined,
+        mqtt: this.outgoingMqttMetadata(options.publishTopic),
       });
     }
   }
@@ -414,8 +424,22 @@ export class DeviceRuntime {
     return this.transport?.connections() ?? [];
   }
 
-  private handleData(connectionId: string, data: Buffer): void {
+  private handleData(
+    connectionId: string,
+    data: Buffer,
+    metadata?: MqttMessageMetadata,
+  ): void {
     this.counters.rxBytes += data.length;
+
+    if (
+      this._config.transport.type === 'mqtt-client' ||
+      this._config.transport.type === 'mqtt-broker'
+    ) {
+      this.counters.rxFrames += 1;
+      this.templateCounters.rx = (this.templateCounters.rx ?? 0) + 1;
+      this.enqueueFrame(connectionId, data, metadata);
+      return;
+    }
 
     let framer = this.framers.get(connectionId);
     if (!framer) {
@@ -441,10 +465,14 @@ export class DeviceRuntime {
 
   // 每个连接一条 Promise 链，保证异步规则处理仍按报文到达顺序执行；
   // catch 留在链内，单帧失败不会中断后续帧。
-  private enqueueFrame(connectionId: string, frame: Buffer): void {
+  private enqueueFrame(
+    connectionId: string,
+    frame: Buffer,
+    metadata?: MqttMessageMetadata,
+  ): void {
     const previous = this.frameQueues.get(connectionId) ?? Promise.resolve();
     const next = previous
-      .then(() => this.handleFrame(connectionId, frame))
+      .then(() => this.handleFrame(connectionId, frame, metadata))
       .catch((error) => {
         this.reportError(`处理报文失败：${errorMessage(error)}`, connectionId);
       });
@@ -456,7 +484,11 @@ export class DeviceRuntime {
     });
   }
 
-  private async handleFrame(connectionId: string, frame: Buffer): Promise<void> {
+  private async handleFrame(
+    connectionId: string,
+    frame: Buffer,
+    metadata?: MqttMessageMetadata,
+  ): Promise<void> {
     let decoded;
     try {
       decoded = this.codec.decode(frame);
@@ -471,6 +503,7 @@ export class DeviceRuntime {
         data: frame.toString('hex'),
         size: frame.length,
         error: message,
+        mqtt: metadata,
       });
       this.bus.emit('error', { deviceId: this.id, message, connectionId });
       return;
@@ -487,6 +520,7 @@ export class DeviceRuntime {
       decoded: decoded.fields,
       error: decoded.error,
       note: decoded.warnings?.length ? decoded.warnings.join('; ') : undefined,
+      mqtt: metadata,
     });
 
     if (!decoded.valid) {
@@ -508,11 +542,16 @@ export class DeviceRuntime {
       );
     }
 
-    await this.runTrigger('frame', connectionId, decoded.fields);
+    await this.runTrigger('frame', connectionId, decoded.fields, metadata);
   }
 
   private handleConnect(connection: ConnectionInfo): void {
-    this.framers.set(connection.id, createFramer(this._config.framing));
+    if (
+      this._config.transport.type !== 'mqtt-client' &&
+      this._config.transport.type !== 'mqtt-broker'
+    ) {
+      this.framers.set(connection.id, createFramer(this._config.framing));
+    }
     this.pushTraffic(this.systemEvent(`连接已建立 ${remoteLabel(connection)}`, connection.id));
     this.emitConnections();
     void this.runTrigger('connect', connection.id)
@@ -528,7 +567,11 @@ export class DeviceRuntime {
         const stillConnected = this.transport
           ?.connections()
           .some((item) => item.id === connection.id);
-        if (stillConnected) {
+        if (
+          stillConnected &&
+          (this._config.transport.type === 'tcp-client' ||
+            this._config.transport.type === 'mqtt-client')
+        ) {
           this.protocolSession.onConnectionReady(connection.id);
         }
       });
@@ -569,7 +612,7 @@ export class DeviceRuntime {
       throw new Error('连接已断开');
     }
 
-    await transport.send(connectionId, data);
+    await transport.send(connectionId, data, { topic: ctx.topic });
 
     this.counters.txBytes += data.length;
     this.counters.txFrames += 1;
@@ -588,6 +631,7 @@ export class DeviceRuntime {
       decoded: decoded?.fields,
       note: `${label} seq=${ctx.sequence}（${ctx.attempt}/${ctx.maxRetries}）`,
       error: decoded && !decoded.valid ? decoded.error : undefined,
+      mqtt: this.outgoingMqttMetadata(ctx.topic),
     });
   }
 
@@ -595,12 +639,17 @@ export class DeviceRuntime {
     trigger: RuleTrigger,
     connectionId?: string,
     req?: Record<string, unknown>,
+    mqtt?: MqttMessageMetadata,
   ): Promise<void> {
     for (const rule of this.rules) {
       if (!rule.enabled) continue;
       if (ruleTrigger(rule) !== trigger) continue;
       if (trigger === 'frame' && !matchesFields(req ?? {}, rule.match)) continue;
-      await this.applyRule(rule, connectionId, req);
+      if (
+        rule.topicFilter !== undefined &&
+        (!mqtt || !mqttTopicMatchesFilter(mqtt.topic, rule.topicFilter))
+      ) continue;
+      await this.applyRule(rule, connectionId, req, mqtt);
     }
   }
 
@@ -608,9 +657,10 @@ export class DeviceRuntime {
     rule: Rule,
     connectionId?: string,
     req?: Record<string, unknown>,
+    mqtt?: MqttMessageMetadata,
   ): Promise<void> {
     const trigger = ruleTrigger(rule);
-    const context = this.templateContext(connectionId, req);
+    const context = this.templateContext(connectionId, req, mqtt);
 
     if (rule.set) {
       try {
@@ -627,6 +677,23 @@ export class DeviceRuntime {
         : [rule.send]
       : [];
 
+    let publishTopic: string | undefined;
+    if (rule.publishTopic !== undefined) {
+      try {
+        const resolved = evaluate(rule.publishTopic, context);
+        if (typeof resolved !== 'string' || resolved.trim() === '') {
+          throw new Error('规则发布主题求值后不能为空');
+        }
+        publishTopic = resolved;
+      } catch (error) {
+        this.reportError(
+          `规则 ${ruleLabel(rule)} 发布主题无效：${errorMessage(error)}`,
+          connectionId,
+        );
+        return;
+      }
+    }
+
     for (const message of messages) {
       try {
         await this.send(message, {
@@ -634,6 +701,8 @@ export class DeviceRuntime {
           target: trigger === 'interval' ? rule.target : undefined,
           req,
           rule: ruleLabel(rule),
+          publishTopic,
+          mqtt,
           silentIfNoConnection: trigger === 'interval' || trigger === 'start',
         });
       } catch (error) {
@@ -710,6 +779,7 @@ export class DeviceRuntime {
   private templateContext(
     connectionId?: string,
     req?: Record<string, unknown>,
+    mqtt?: MqttMessageMetadata,
   ): TemplateContext {
     const connection = connectionId
       ? this.transport?.connections().find((item) => item.id === connectionId)
@@ -720,8 +790,21 @@ export class DeviceRuntime {
       state: this.state,
       counters: this.templateCounters,
       conn: connection,
+      mqtt,
       device: this._config.deviceInfo,
       now: Date.now(),
+    };
+  }
+
+  private outgoingMqttMetadata(topic?: string): MqttMessageMetadata | undefined {
+    const transport = this._config.transport;
+    if (transport.type !== 'mqtt-client' && transport.type !== 'mqtt-broker') {
+      return undefined;
+    }
+    return {
+      topic: topic ?? transport.publishTopic,
+      qos: transport.publishQos,
+      retain: false,
     };
   }
 
