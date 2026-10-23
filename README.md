@@ -19,14 +19,14 @@
 - TCP client 设备（单个上游目标，启动不等待上游，指数退避自动重连）
 - 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
-- 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、字典、ACK 重传、数组字段 波形）
+- 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段 波形）
 - 字段：`u8/i8/u16/i16/u24/i24/u32/i32/f32/f64`、`bytes`、`string`、`bcd`
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
 - 模板：请求字段、设备状态、计数器、连接信息、设备信息和随机数
 - 设备信息：可选的厂商、型号、S/N、硬件/固件版本和厂商自定义 TNS/IMEI 元数据
-- Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看
-- 配置持久化到 `data/devices.json`；报文和运行时状态保存在内存
+- Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看、全局数据字典管理
+- 配置持久化到 `data/devices.json`，用户数据字典持久化到 `data/dictionaries.json`；报文和运行时状态保存在内存
 - 内置 3 个预设，分别展示行协议、TCP 回显和传感器数据
 
 ## 快速开始
@@ -278,7 +278,7 @@ codec:
 - **auto**：`timestamp` 按 `format`（YYYY/MM/DD/HH/mm/ss）和 codec 时区生成；`sequence` 自动递增。显式传 `null` 可省略 optional 自动字段（如注册包）。
 - **default / defaultFrom**：编码缺省值；`defaultFrom: tnsImei` 等可把设备信息绑定到设备码。
 - **pattern**：解码校验，`error` 判为无效，`warning` 只提示。
-- **dictionaries**：`字典名 → 数据码 → { name, unit, multi, valueFormat }`；repeat 通过 `dictionary` + `keyField` 查表。未知码只记 warning。
+- **dictionaries**：全局数据字典，`repeat.dictionary` 保存字典 ID，`keyField` 决定用哪个 item 字段查表。字典内容不再写进设备配置；未知码只记 warning。
 - **session**：配置 ACK 报文、需要跟踪的报文、流水号/状态字段和成功值；不配置就完全没有 ACK/重传行为。
 
 
@@ -293,23 +293,46 @@ codec:
 
 **数组字段 波形**：
 
-- 在字典条目上声明 `valueFormat`：
+- 在全局字典条目上声明 `valueFormat`（内置字典放在 `dictionaries/*.yaml`，用户字典通过 Web 管理）：
   ```yaml
-  dictionaries:
-    codes:
-      "220":
-        name: 示例数组
-        unit: Hz
-        valueFormat:
-          type: int16Array
-          points: 1024
-          endian: be
-          encoding: hex       # hex | base64
-          crc: { algo: crc16-modbus, endian: le }
+  # dictionaries/codes.yaml
+  id: codes
+  name: 厂商数据码
+  entries:
+    "220":
+      name: 示例数组
+      unit: Hz
+      valueFormat:
+        type: int16Array
+        points: 1024
+        endian: be
+        encoding: hex       # hex | base64
+        crc: { algo: crc16-modbus, endian: le }
   ```
+  repeat 中只写 `dictionary: codes`。
 - 编码输入：repeat item 使用 `waveform: [1024 个 int16]`；解码后 item 的 `values` 为空数组，`waveform` 包含 `points`、`crc`、`crcValid`、`encoding`；`mapField` 中只保留摘要，避免重复传输 1024 个点。
 - CRC 校验失败时整帧仍然有效，但波形点被丢弃（`points: null`）并记 warning。
 - `encoding` 支持 `hex` / `base64`，都是文本安全形态。原始二进制波形段会与分隔符 tokenization 冲突，当前不包含；需要时使用 `length-prefix` / `fixed` 分帧配合后续的 binaryBlob 扩展。
+
+### 全局数据字典
+
+数据字典是跨设备的全局资源。设备配置只保存 `repeat.dictionary` 的 ID，不保存 entries；多个设备引用同一个 ID 时共享同一份码表。
+
+- **内置字典**：仓库 `dictionaries/*.yaml`，只读；修改 YAML 后重启服务生效。内置字典不能通过 API 修改或删除，可在 Web 中“复制为自定义”。
+- **用户字典**：保存在 `data/dictionaries.json`，通过控制台左侧“数据字典”管理；保存后对运行中的设备立即生效，无需重启。
+- **引用规则**：`repeat.dictionary` 必须是合法的全局 ID；服务端在保存设备、加载 `devices.json` 和校验预设时检查引用，缺失引用返回 422 或跳过该设备。
+- **删除保护**：仍被设备引用的用户字典不能删除；更新字典内容不会被阻止，下一帧编解码即使用新内容。ID 创建后不可修改，名称可以修改。
+- **自动迁移**：启动时会把旧 `codec.dictionaries` 转成全局字典并改写 repeat 引用，原 `devices.json` 备份为 `devices.json.pre-dictionary-migration-<timestamp>.bak`；设备 POST/PUT 也接受旧内联字典并自动迁移。`/api/config/validate` 不落盘迁移，旧内联配置会返回明确的 422 提示。
+
+API：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/dictionaries` | 字典列表，含 `builtin` 和 `usedBy` |
+| GET | `/api/dictionaries/:id` | 查询单个字典，含 `builtin` 和 `usedBy` |
+| POST | `/api/dictionaries` | 新建用户字典 |
+| PUT | `/api/dictionaries/:id` | 更新用户字典；内置只读 |
+| DELETE | `/api/dictionaries/:id` | 删除用户字典；被引用时 409 |
 
 ### 设备信息（可选）
 
@@ -397,6 +420,8 @@ packages/core      设备引擎：schema、framing、codec、checksum、rules、
 packages/server    Fastify REST + WebSocket + JSON 持久化 + 静态托管
 packages/web       React + Vite + Tailwind 控制台
 presets/           内置 YAML 预设
+dictionaries/      内置只读数据字典 YAML（启动时加载）
+data/              本地运行数据（devices.json、dictionaries.json，gitignored）
 scripts/           演示客户端
 packages/core/src/__tests__/  单元测试和 TCP 集成测试
 ```
@@ -407,7 +432,7 @@ packages/core/src/__tests__/  单元测试和 TCP 集成测试
 
 ```bash
 pnpm -r typecheck    # 三个包的类型检查
-pnpm test            # 核心测试 + Web 纯函数测试
+pnpm test            # 核心 + 服务端存储/迁移 + Web 纯函数测试
 pnpm build           # 类型检查 + 构建前端
 pnpm dev             # server + Vite
 pnpm start           # 生产模式（需要先 build）
@@ -420,6 +445,8 @@ pnpm start           # 生产模式（需要先 build）
 - delimiter（hex/text 分隔符、UTF-8 多字节跨包）、fixed、raw 分帧
 - 字段编解码回环、CRC 校验失败、固定长度/剩余长度/fromField
 - 通用 `text` codec：prefix/suffix/match、optional 字段、自动时间戳/流水号、repeat/字典/mapField、pattern 警告和异常帧
+- 全局数据字典：schema/ID 校验、引用收集、内联字典迁移、已有字典匹配、ID 冲突、无效数据保留、运行时实时 provider
+- 服务端字典仓库与设备存储：内置/用户字典加载、CRUD、损坏备份、启动迁移、备份文件、幂等和跨设备前向引用
 - 文本 codec 集成：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
 - ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP Client 暂停/重连恢复、TCP Server 断连丢弃、stop 清理
 - 数组字段：int16 BE、CRC16/Modbus 已知向量、hex/base64 round-trip、CRC 失败丢弃、CRC 字节序
@@ -438,7 +465,7 @@ pnpm start           # 生产模式（需要先 build）
 | --- | --- | --- |
 | `DEVICEFORGE_PORT` | `7321` | 控制面端口 |
 | `DEVICEFORGE_HOST` | `127.0.0.1` | 控制面绑定地址 |
-| `DEVICEFORGE_DATA_DIR` | `<repo>/data` | 设备配置存储目录 |
+| `DEVICEFORGE_DATA_DIR` | `<repo>/data` | 设备配置和用户数据字典存储目录 |
 | `LOG_LEVEL` | `info` | Fastify/Pino 日志级别 |
 
 模拟设备的端点由设备配置中的 `transport` 决定：TCP Server 监听 `transport.host/port`，TCP Client 主动连接该目标；控制面本身仍只绑定本机。
@@ -461,6 +488,8 @@ pnpm start           # 生产模式（需要先 build）
 - 没有 TLS、认证和多用户；控制面默认只绑定 `127.0.0.1`，不要直接暴露到公网。
 - `raw` framing 在 TCP 上把每个数据块当作一帧，不保证与业务消息边界一致；带明确边界的协议请使用 length-prefix/delimiter/fixed。
 - JS script codec、录制回放、故障注入尚未实现；当前 UI 中的协议标签已标注“规划中”。
+- 内置数据字典来自 `dictionaries/*.yaml`，修改后需要重启服务；Web 中只读，需要修改时复制为自定义字典。被设备引用的用户字典不能删除。
+- 旧配置的内联字典在启动或设备 POST/PUT 时自动迁移；`/api/config/validate` 只预览，不落盘，因此源码模式粘贴旧内联字典会返回 422。
 
 ## 设计约定
 
