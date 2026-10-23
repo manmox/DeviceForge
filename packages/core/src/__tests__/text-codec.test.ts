@@ -386,7 +386,7 @@ describe('text codec repeat and dictionaries', () => {
     expect(decoded.fields.groups).toHaveLength(2);
     expect(decoded.fields.data).toMatchObject({
       item101: { id: '101', value: '12.7', values: ['12.7'], name: '示例数值', unit: 'V' },
-      item001: { id: '001', value: '25', values: ['25', '0'] },
+      item102: { id: '102', value: '25', values: ['25', '0'] },
     });
   });
 
