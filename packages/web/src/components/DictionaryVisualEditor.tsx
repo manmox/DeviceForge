@@ -111,16 +111,16 @@ export function DictionaryVisualEditor({
       </div>
 
       <div className="max-h-[420px] overflow-auto">
-        <table className="w-full min-w-[900px] border-collapse text-left">
+        <table className="w-full min-w-[780px] table-fixed border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-ink-850 text-[10px] font-medium text-mist-500">
             <tr>
               <th className="w-28 border-b border-white/10 px-3 py-2">码值</th>
               <th className="w-44 border-b border-white/10 px-2 py-2">名称</th>
-              <th className="w-28 border-b border-white/10 px-2 py-2">单位</th>
+              <th className="w-24 border-b border-white/10 px-2 py-2">单位</th>
               <th className="w-16 border-b border-white/10 px-2 py-2 text-center">多值</th>
               <th className="border-b border-white/10 px-2 py-2">描述</th>
-              <th className="w-32 border-b border-white/10 px-2 py-2">波形格式</th>
-              <th className="w-10 border-b border-white/10 px-2 py-2" />
+              <th className="w-28 border-b border-white/10 px-2 py-2">波形格式</th>
+              <th className="sticky right-0 z-20 w-11 border-b border-l border-white/10 bg-ink-850 px-1 py-2" aria-label="操作" />
             </tr>
           </thead>
           <tbody>
@@ -185,7 +185,7 @@ function DictionaryEntryRows({
 
   return (
     <>
-      <tr className="border-b border-white/[0.06] align-middle hover:bg-white/[0.02]">
+      <tr className="group border-b border-white/[0.06] align-middle hover:bg-white/[0.02]">
         <td className="px-2 py-1.5">
           <TextInput
             value={row.code}
@@ -243,7 +243,7 @@ function DictionaryEntryRows({
             {format ? '数组字段' : '配置格式'}
           </button>
         </td>
-        <td className="px-2 py-1.5 text-right">
+        <td className="sticky right-0 z-10 border-l border-white/10 bg-ink-900 px-1 py-1.5 text-right group-hover:bg-ink-850">
           <button
             type="button"
             className="btn btn-ghost rounded-md p-1.5 text-mist-500 hover:text-rose-300"
