@@ -1,24 +1,22 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { DeviceConfigSchema, type DeviceConfig } from '@deviceforge/core';
+import type { DeviceConfig } from '@deviceforge/core';
 import type { FastifyInstance } from 'fastify';
 import YAML from 'yaml';
 import { z } from 'zod';
 import { paths } from '../config';
+import { issuesOf, validateDeviceDocument } from '../lib/device-validation';
+import type { DictionaryStore } from '../store/dictionary-store';
 
 const ValidateBodySchema = z.union([
   z.object({ yaml: z.string() }),
   z.object({ config: z.unknown() }),
 ]);
 
-function issuesOf(error: z.ZodError): { path: string; message: string }[] {
-  return error.issues.map((issue) => ({
-    path: issue.path.join('.'),
-    message: issue.message,
-  }));
-}
-
-export async function registerConfigRoutes(app: FastifyInstance): Promise<void> {
+export async function registerConfigRoutes(
+  app: FastifyInstance,
+  dictionaries: DictionaryStore,
+): Promise<void> {
   app.get('/api/health', async () => ({
     ok: true,
     service: 'deviceforge',
@@ -45,14 +43,14 @@ export async function registerConfigRoutes(app: FastifyInstance): Promise<void> 
       raw = body.data.config;
     }
 
-    const parsed = DeviceConfigSchema.safeParse(raw);
-    if (!parsed.success) {
-      return reply.code(422).send({ error: '配置校验失败', issues: issuesOf(parsed.error) });
+    const result = validateDeviceDocument(raw, (id) => dictionaries.has(id));
+    if (!result.config) {
+      return reply.code(422).send({ error: '配置校验失败', issues: result.issues });
     }
 
     // 成功时返回经 Zod 归一化的完整配置（默认值已补齐），不是布尔值；可视化
-    // 编辑器会用该值替换草稿。校验失败返回 422。
-    return { config: parsed.data };
+    // 编辑器会用该值替换草稿。字典只保留 ID，绝不把 entries 物化回设备配置。
+    return { config: result.config };
   });
 
   app.get('/api/presets', async () => {
@@ -73,18 +71,21 @@ export async function registerConfigRoutes(app: FastifyInstance): Promise<void> 
     for (const file of files) {
       try {
         const yaml = readFileSync(path.join(paths.presetsDir, file), 'utf8');
-        const parsed = DeviceConfigSchema.safeParse(YAML.parse(yaml));
-        if (!parsed.success) {
-          console.warn(`[presets] 跳过无效预设 ${file}`, parsed.error.issues);
+        const result = validateDeviceDocument(
+          YAML.parse(yaml),
+          (id) => dictionaries.has(id),
+        );
+        if (!result.config) {
+          console.warn(`[presets] 跳过无效预设 ${file}`, result.issues);
           continue;
         }
         presets.push({
           file,
-          id: parsed.data.id,
-          name: parsed.data.name,
-          description: parsed.data.description ?? '',
+          id: result.config.id,
+          name: result.config.name,
+          description: result.config.description ?? '',
           yaml,
-          config: parsed.data,
+          config: result.config,
         });
       } catch (error) {
         console.warn(`[presets] 读取预设 ${file} 失败`, error);

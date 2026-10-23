@@ -3,6 +3,7 @@ import {
   type ConnectionInfo,
   type DeviceConfig,
   type DeviceStatus,
+  type DictionaryProvider,
   type TrafficEvent,
 } from '@deviceforge/core';
 import type { DeviceStore } from './store/device-store';
@@ -41,7 +42,10 @@ export class RuntimeManager {
   private readonly stateListeners = new Set<(event: DeviceStateEvent) => void>();
   private readonly devicesListeners = new Set<() => void>();
 
-  constructor(private readonly store: DeviceStore) {
+  constructor(
+    private readonly store: DeviceStore,
+    private readonly dictionaries?: DictionaryProvider,
+  ) {
     for (const config of store.list()) this.ensureRuntime(config);
   }
 
@@ -181,7 +185,10 @@ export class RuntimeManager {
     const existing = this.runtimes.get(config.id);
     if (existing) return existing;
 
-    const runtime = new DeviceRuntime(config, { trafficCapacity: 5000 });
+    const runtime = new DeviceRuntime(config, {
+      trafficCapacity: 5000,
+      dictionaries: this.dictionaries,
+    });
     const unsubscribers = [
       runtime.on('traffic', (event) => this.emitTraffic(event)),
       runtime.on('status', (status) => this.emitStatus(status)),

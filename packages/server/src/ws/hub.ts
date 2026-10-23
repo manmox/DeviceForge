@@ -67,6 +67,10 @@ export class WsHub {
     this.broadcast('devicesChanged', { ts: Date.now() });
   }
 
+  dictionariesChanged(): void {
+    this.broadcast('dictionariesChanged', { ts: Date.now() });
+  }
+
   close(): void {
     clearInterval(this.flushTimer);
     clearInterval(this.heartbeatTimer);

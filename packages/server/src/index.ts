@@ -6,8 +6,10 @@ import { ZodError } from 'zod';
 import { control, paths } from './config';
 import { registerConfigRoutes } from './routes/config';
 import { registerDeviceRoutes } from './routes/devices';
+import { registerDictionaryRoutes } from './routes/dictionaries';
 import { RuntimeManager } from './runtime-manager';
 import { DeviceStore } from './store/device-store';
+import { DictionaryStore } from './store/dictionary-store';
 import { WsHub } from './ws/hub';
 
 async function main(): Promise<void> {
@@ -15,8 +17,12 @@ async function main(): Promise<void> {
     logger: { level: process.env.LOG_LEVEL ?? 'info' },
   });
 
-  const store = new DeviceStore(paths.devicesFile);
-  const manager = new RuntimeManager(store);
+  const dictionaries = new DictionaryStore(
+    paths.dictionariesFile,
+    paths.builtinDictionariesDir,
+  );
+  const store = new DeviceStore(paths.devicesFile, dictionaries);
+  const manager = new RuntimeManager(store, dictionaries.provider());
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -49,8 +55,9 @@ async function main(): Promise<void> {
     await app.register(fastifyStatic, { root: paths.webDist, prefix: '/' });
   }
 
-  await registerConfigRoutes(app);
-  await registerDeviceRoutes(app, manager);
+  await registerConfigRoutes(app, dictionaries);
+  await registerDeviceRoutes(app, manager, dictionaries);
+  await registerDictionaryRoutes(app, dictionaries, store);
 
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith('/api') || request.url.startsWith('/ws')) {
@@ -74,6 +81,7 @@ async function main(): Promise<void> {
     serverTime: Date.now(),
   }));
 
+  dictionaries.onChange(() => hub.dictionariesChanged());
   manager.onTraffic((event) => hub.pushTraffic(event));
   manager.onStatus((status) => hub.status(status));
   manager.onConnections((deviceId, connections) => hub.connections(deviceId, connections));
