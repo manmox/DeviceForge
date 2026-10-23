@@ -97,7 +97,7 @@ describe('inline dictionary migration', () => {
       [
         {
           id: 'sample-codes',
-          name: '内置字典',
+          name: '本机字典',
           entries,
         },
       ],
