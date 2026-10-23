@@ -928,6 +928,49 @@ export const DeviceInfoSchema = z.object({
   tnsImei: z.string().optional(),
 });
 
+export const FaultTriggerSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('probability'),
+    percent: z.number().min(0).max(100),
+  }),
+  z.discriminatedUnion('mode', [
+    z.object({
+      type: z.literal('sequence'),
+      mode: z.literal('indices'),
+      indices: z.array(z.number().int().positive()).min(1),
+    }),
+    z.object({
+      type: z.literal('sequence'),
+      mode: z.literal('every'),
+      interval: z.number().int().positive(),
+    }),
+  ]),
+]);
+
+export const FaultActionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('delay'),
+    delayMs: z.number().int().min(1).max(300_000),
+  }),
+  z.object({ type: z.literal('drop') }),
+  z.object({ type: z.literal('disconnect') }),
+  z.object({ type: z.literal('corrupt') }),
+]);
+
+export const FaultRuleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  enabled: z.boolean().default(true),
+  direction: z.enum(['in', 'out', 'both']).default('both'),
+  trigger: FaultTriggerSchema,
+  action: FaultActionSchema,
+});
+
+export const FaultInjectionConfigSchema = z.object({
+  segmentSizeBytes: z.number().int().min(1).max(65_536).default(256),
+  rules: z.array(FaultRuleSchema).max(100).default([]),
+});
+
 export const DeviceConfigSchema = z.object({
   id: z
     .string()
@@ -941,6 +984,10 @@ export const DeviceConfigSchema = z.object({
   codec: CodecSchema.default({ type: 'raw', display: 'hex' }),
   state: z.record(z.string(), z.unknown()).default({}),
   rules: z.array(RuleSchema).default([]),
+  faultInjection: FaultInjectionConfigSchema.default({
+    segmentSizeBytes: 256,
+    rules: [],
+  }),
   autoStart: z.boolean().default(false),
 }).superRefine((config, ctx) => {
   const isMqtt =
@@ -980,4 +1027,10 @@ export type CodecConfig = z.infer<typeof CodecSchema>;
 export type OutgoingMessage = z.infer<typeof OutgoingMessageSchema>;
 export type Rule = z.infer<typeof RuleSchema>;
 export type DeviceInfo = z.infer<typeof DeviceInfoSchema>;
+
+export type FaultTrigger = z.infer<typeof FaultTriggerSchema>;
+export type FaultAction = z.infer<typeof FaultActionSchema>;
+export type FaultRule = z.infer<typeof FaultRuleSchema>;
+export type FaultInjectionConfig = z.infer<typeof FaultInjectionConfigSchema>;
+
 export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;

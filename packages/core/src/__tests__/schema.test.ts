@@ -18,6 +18,7 @@ describe('DeviceConfigSchema deviceInfo', () => {
     expect(parsed.codec).toEqual({ type: 'raw', display: 'hex' });
     expect(parsed.state).toEqual({});
     expect(parsed.rules).toEqual([]);
+    expect(parsed.faultInjection).toEqual({ segmentSizeBytes: 256, rules: [] });
     expect(parsed.autoStart).toBe(false);
   });
 
@@ -105,6 +106,36 @@ describe('DeviceConfigSchema transports', () => {
         maxDelayMs: 10_000,
       },
     });
+  });
+
+  it('validates fault actions, direction, probability and packet sequences', () => {
+    const parsed = DeviceConfigSchema.parse({
+      ...baseConfig(),
+      faultInjection: {
+        rules: [{
+          id: 'drop-every-third',
+          name: '每三段丢弃',
+          direction: 'in',
+          trigger: { type: 'sequence', mode: 'every', interval: 3 },
+          action: { type: 'drop' },
+        }],
+      },
+    });
+    expect(parsed.faultInjection.segmentSizeBytes).toBe(256);
+    expect(parsed.faultInjection.rules[0]?.enabled).toBe(true);
+
+    const invalid = DeviceConfigSchema.safeParse({
+      ...baseConfig(),
+      faultInjection: {
+        rules: [{
+          id: 'bad',
+          name: '无效概率',
+          trigger: { type: 'probability', percent: 101 },
+          action: { type: 'delay', delayMs: 0 },
+        }],
+      },
+    });
+    expect(invalid.success).toBe(false);
   });
 
   it('rejects missing or zero tcp-client ports', () => {

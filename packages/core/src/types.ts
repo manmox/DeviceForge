@@ -72,9 +72,27 @@ export interface DeviceStatus {
   deviceId: string;
   state: DeviceRuntimeState;
   error?: string;
+  faultInjectionEnabled: boolean;
   transport: TransportStatus;
   endpoints: string[];
   connections: ConnectionInfo[];
   startedAt?: number;
   counters: Counters;
+}
+
+export type RecordingState = 'recording' | 'stopped' | 'interrupted' | 'error';
+
+export interface RecordingSession {
+  id: string;
+  deviceId: string;
+  startedAt: number;
+  endedAt?: number;
+  state: RecordingState;
+  eventCount: number;
+  error?: string;
+}
+
+export interface RecordedTrafficEvent {
+  offsetMs: number;
+  event: TrafficEvent;
 }

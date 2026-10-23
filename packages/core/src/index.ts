@@ -7,6 +7,7 @@ export * from './codec';
 export * from './rules/template';
 export * from './rules/matcher';
 export * from './runtime/device-runtime';
+export * from './runtime/fault-injector';
 export * from './runtime/event-bus';
 export * from './runtime/traffic-buffer';
 export * from './transport';

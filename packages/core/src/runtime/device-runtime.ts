@@ -23,6 +23,7 @@ import {
   type ProtocolSendContext,
 } from './protocol-session';
 import { TrafficBuffer } from './traffic-buffer';
+import { FaultInjector, type AppliedFault } from './fault-injector';
 
 export interface DeviceEventMap {
   traffic: TrafficEvent;
@@ -89,6 +90,7 @@ export class DeviceRuntime {
 
   private codec: Codec;
   private readonly dictionaryProvider?: DictionaryProvider;
+  private readonly faultInjector: FaultInjector;
   private rules: Rule[];
   private state: Record<string, unknown>;
   private templateCounters: Record<string, number> = { tx: 0, rx: 0 };
@@ -111,9 +113,16 @@ export class DeviceRuntime {
     this.rules = config.rules;
     this.state = structuredClone(config.state);
     this.traffic = new TrafficBuffer(options.trafficCapacity ?? 5000);
+    this.faultInjector = new FaultInjector(config.faultInjection, {
+      onFault: (event) => this.recordAppliedFault(event),
+      disconnect: async (connectionId) => {
+        await this.transport?.disconnect(connectionId);
+      },
+    });
     this.status = {
       deviceId: config.id,
       state: 'stopped',
+      faultInjectionEnabled: false,
       transport: idleTransportStatus(config),
       endpoints: [],
       connections: [],
@@ -132,6 +141,20 @@ export class DeviceRuntime {
 
   get isActive(): boolean {
     return this.status.state === 'running' || this.status.state === 'starting';
+  }
+
+  get faultInjectionEnabled(): boolean {
+    return this.faultInjector.isEnabled;
+  }
+
+  async setFaultInjectionEnabled(enabled: boolean): Promise<void> {
+    await this.faultInjector.setEnabled(enabled);
+    this.setStatus({ faultInjectionEnabled: enabled });
+  }
+
+  updateFaultInjection(config: DeviceConfig['faultInjection']): void {
+    this._config = { ...this._config, faultInjection: config };
+    this.faultInjector.setConfig(config);
   }
 
   on<K extends keyof DeviceEventMap>(
@@ -223,6 +246,8 @@ export class DeviceRuntime {
     this.clearTimers();
     this.clearStatsTimer();
     this.protocolSession.stop();
+    this.faultInjector.closeAll();
+    await this.setFaultInjectionEnabled(false);
     this.framers.clear();
     this.frameQueues.clear();
 
@@ -235,6 +260,7 @@ export class DeviceRuntime {
       this.stopping = false;
       this.setStatus({
         state: 'stopped',
+        faultInjectionEnabled: false,
         transport: idleTransportStatus(this._config),
         endpoints: [],
         connections: [],
@@ -253,6 +279,9 @@ export class DeviceRuntime {
     if (this.isActive) throw new Error('请先停止设备再修改配置');
 
     this._config = config;
+    this.faultInjector.closeAll();
+    this.faultInjector.setConfig(config.faultInjection);
+    void this.faultInjector.setEnabled(false);
     this.codec = createCodec(config.codec, {
       deviceInfo: config.deviceInfo,
       dictionaries: this.dictionaryProvider,
@@ -269,6 +298,7 @@ export class DeviceRuntime {
     this.setStatus({
       deviceId: config.id,
       state: 'stopped',
+      faultInjectionEnabled: false,
       transport: idleTransportStatus(config),
       endpoints: [],
       connections: [],
@@ -348,14 +378,18 @@ export class DeviceRuntime {
         : undefined;
 
       try {
-        await transport.send(connectionId, data, { topic: options.publishTopic });
+        await this.sendThroughFaultInjector(
+          transport,
+          connectionId,
+          data,
+          options.publishTopic,
+        );
         if (pending) this.protocolSession.arm(pending);
       } catch (error) {
         if (pending) this.protocolSession.cancel(pending);
         throw error;
       }
 
-      this.counters.txBytes += data.length;
       this.counters.txFrames += 1;
       this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
 
@@ -370,6 +404,10 @@ export class DeviceRuntime {
         decoded: decoded?.fields,
         rule: options.rule,
         error: decoded && !decoded.valid ? decoded.error : undefined,
+        note:
+          this.faultInjector.isEnabled && this._config.faultInjection.rules.length > 0
+            ? '故障注入结果详见系统事件'
+            : undefined,
         mqtt: this.outgoingMqttMetadata(options.publishTopic),
       });
     }
@@ -413,6 +451,7 @@ export class DeviceRuntime {
   getStatus(): DeviceStatus {
     return {
       ...this.status,
+      faultInjectionEnabled: this.faultInjector.isEnabled,
       transport: this.transport?.status() ?? this.status.transport,
       endpoints: this.transport?.endpoints() ?? [],
       connections: this.transport?.connections() ?? [],
@@ -435,12 +474,39 @@ export class DeviceRuntime {
       this._config.transport.type === 'mqtt-client' ||
       this._config.transport.type === 'mqtt-broker'
     ) {
-      this.counters.rxFrames += 1;
-      this.templateCounters.rx = (this.templateCounters.rx ?? 0) + 1;
-      this.enqueueFrame(connectionId, data, metadata);
+      void this.faultInjector
+        .processMqtt(connectionId, 'in', data)
+        .then(async (result) => {
+          if (result.applied) this.recordAppliedFault(result.applied, metadata);
+          if (result.applied?.action === 'disconnect') {
+            await this.transport?.disconnect(connectionId);
+            return;
+          }
+          if (!result.data) return;
+          this.counters.rxFrames += 1;
+          this.templateCounters.rx = (this.templateCounters.rx ?? 0) + 1;
+          this.enqueueFrame(connectionId, result.data, metadata);
+        })
+        .catch((error) => this.reportError(errorMessage(error), connectionId));
       return;
     }
 
+    if (
+      this.faultInjector.isEnabled &&
+      this._config.faultInjection.rules.length > 0
+    ) {
+      void this.faultInjector
+        .pushTcp(connectionId, 'in', data, async (segment) => {
+          this.handleTcpData(connectionId, segment);
+        })
+        .catch((error) => this.reportError(errorMessage(error), connectionId));
+      return;
+    }
+
+    this.handleTcpData(connectionId, data);
+  }
+
+  private handleTcpData(connectionId: string, data: Buffer): void {
     let framer = this.framers.get(connectionId);
     if (!framer) {
       framer = createFramer(this._config.framing);
@@ -546,6 +612,7 @@ export class DeviceRuntime {
   }
 
   private handleConnect(connection: ConnectionInfo): void {
+    this.faultInjector.openConnection(connection.id);
     if (
       this._config.transport.type !== 'mqtt-client' &&
       this._config.transport.type !== 'mqtt-broker'
@@ -579,6 +646,7 @@ export class DeviceRuntime {
 
   private handleDisconnect(connectionId: string): void {
     this.framers.delete(connectionId);
+    this.faultInjector.closeConnection(connectionId);
     if (this.stopping) return;
     this.protocolSession.onConnectionClosed(connectionId);
     this.pushTraffic(this.systemEvent('连接已断开', connectionId));
@@ -612,9 +680,7 @@ export class DeviceRuntime {
       throw new Error('连接已断开');
     }
 
-    await transport.send(connectionId, data, { topic: ctx.topic });
-
-    this.counters.txBytes += data.length;
+    await this.sendThroughFaultInjector(transport, connectionId, data, ctx.topic);
     this.counters.txFrames += 1;
     this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
 
@@ -806,6 +872,53 @@ export class DeviceRuntime {
       qos: transport.publishQos,
       retain: false,
     };
+  }
+
+  private async sendThroughFaultInjector(
+    transport: TransportAdapter,
+    connectionId: string,
+    data: Buffer,
+    topic?: string,
+  ): Promise<void> {
+    if (transport.kind === 'mqtt-client' || transport.kind === 'mqtt-broker') {
+      const result = await this.faultInjector.processMqtt(connectionId, 'out', data);
+      if (result.applied) {
+        this.recordAppliedFault(result.applied, this.outgoingMqttMetadata(topic));
+      }
+      if (result.applied?.action === 'disconnect') {
+        await transport.disconnect(connectionId);
+        return;
+      }
+      if (!result.data) return;
+      await transport.send(connectionId, result.data, { topic });
+      this.counters.txBytes += result.data.length;
+      return;
+    }
+
+    await this.faultInjector.pushTcp(connectionId, 'out', data, async (segment) => {
+      await transport.send(connectionId, segment, { topic });
+      this.counters.txBytes += segment.length;
+    });
+  }
+
+  private recordAppliedFault(
+    event: AppliedFault,
+    mqtt?: MqttMessageMetadata,
+  ): void {
+    const direction = event.direction === 'in' ? '入站' : '出站';
+    const item = mqtt ? `第 ${event.index} 条 MQTT 消息` : `第 ${event.index} 段`;
+    const labels: Record<AppliedFault['action'], string> = {
+      delay: '延迟',
+      drop: '丢弃',
+      disconnect: '断开连接',
+      corrupt: '翻转 1 bit',
+    };
+    const traffic = this.systemEvent(
+      `故障注入 ${event.rule.name}：${direction}${item}，${labels[event.action]}，${event.inputBytes} B → ${event.outputBytes} B`,
+      event.connectionId,
+    );
+    if (mqtt) traffic.mqtt = mqtt;
+    this.pushTraffic(traffic);
   }
 
   private pushTraffic(event: TrafficEvent): void {
