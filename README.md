@@ -2,7 +2,7 @@
 
 本地运行的物联网设备仿真工作台。用配置描述设备行为，在本机端口模拟硬件，让上位机照常连接——设备掉线、内网穿透中断时，联调仍然可以继续。
 
-> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、声明式编解码、规则引擎和实时报文控制台。UDP、串口、MQTT、HTTP/WebSocket、Modbus 和录制回放/故障注入在后续里程碑中实现。
+> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、MQTT Client 与内嵌 Broker、声明式编解码、规则引擎和实时报文控制台。UDP、串口、HTTP/WebSocket、Modbus 和录制回放/故障注入仍在路线图中。
 
 ## 为什么做这个
 
@@ -17,6 +17,8 @@
 
 - TCP server 设备（监听本机端口，支持多客户端连接）
 - TCP client 设备（单个上游目标，启动不等待上游，指数退避自动重连）
+- MQTT Client（连接外部 Broker，按主题订阅和发布）
+- MQTT Broker（在本机启动 Broker，接受多个客户端连接）
 - 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
 - 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段 波形）
@@ -158,10 +160,12 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 
 ### 传输方式
 
-`transport.type` 目前支持 `tcp-server` 和 `tcp-client`：
+`transport.type` 支持 `tcp-server`、`tcp-client`、`mqtt-client` 和 `mqtt-broker`：
 
 - **`tcp-server`**：设备监听 `host:port`，可接受多个上位机连接。`port: 0` 表示自动分配，实际端口以运行状态中的端点为准。
 - **`tcp-client`**：设备主动连接一个上游 `host:port`，用于模拟设备上报或网关连接。启动时不会等待上游可用；连接失败后按配置自动重连。
+- **`mqtt-client`**：设备连接外部 MQTT Broker，订阅配置中的主题过滤器，也可向默认主题发布消息。连接失败后自动重连，默认 Client ID 使用设备 ID。
+- **`mqtt-broker`**：设备在本机启动内嵌 MQTT Broker，默认监听 `127.0.0.1:1883`，可接受多个客户端；规则响应和手动发送均发布到配置主题，不要求当前已有客户端连接。
 
 TCP Client 示例：
 
@@ -176,6 +180,51 @@ transport:
     minDelayMs: 500
     maxDelayMs: 10000
 ```
+
+MQTT Client 示例：
+
+```yaml
+transport:
+  type: mqtt-client
+  url: mqtts://broker.example.com:8883
+  clientId: sensor-01 # 可省略，默认使用设备 ID
+  username: demo
+  password: local-secret
+  caFile: /etc/deviceforge/ca.pem # 可省略；仅 mqtts:// 可使用
+  subscriptions:
+    - topic: sensors/+/state
+      qos: 1
+  publishTopic: sensors/device-01/up
+  publishQos: 1
+```
+
+内嵌 Broker 示例：
+
+```yaml
+transport:
+  type: mqtt-broker
+  host: 127.0.0.1
+  port: 1883
+  username: demo # 可选；配置后所有客户端共用这一组凭据
+  password: local-secret
+  certFile: /etc/deviceforge/server.crt # 可选；和 keyFile 同时配置时启用 mqtts://
+  keyFile: /etc/deviceforge/server.key
+  publishTopic: devices/device-01/down
+  publishQos: 0
+```
+
+MQTT 固定使用 3.1.1，支持 QoS 0 和 1。每条 PUBLISH 的载荷直接作为一帧交给 codec，TCP 分帧设置不参与 MQTT 消息处理。入站主题、QoS 和 retain 状态可用于 `mqtt.topic`、`mqtt.qos`、`mqtt.retain` 模板；内嵌 Broker 还提供发布者 `mqtt.clientId`。帧规则可用 `topicFilter` 限定主题，例如 `sensors/+/state`，并用 `publishTopic` 覆盖默认出站主题：
+
+```yaml
+rules:
+  - on: frame
+    topicFilter: sensors/+/state
+    publishTopic: replies/${mqtt.topic}
+    send:
+      hex: AABB
+```
+
+发布 QoS 由传输配置决定，出站 retain 固定关闭。MQTT Client 可填写 CA 文件；Broker 可同时填写证书和私钥启用 TLS。Broker 的用户名和密码为单组共享凭据。设备配置保存在本机 `data/devices.json`，其中的密码按明文保存；该目录由 Git 忽略。当前不提供 MQTT 5、QoS 2、WebSocket、主题 ACL、遗嘱或持久化会话。
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -198,7 +247,7 @@ transport:
 
 | `framing.type` | 说明 |
 | --- | --- |
-| `raw` | 每个 TCP 数据块当作一帧；适合已经按消息边界读取的场景，或在 `tcp-echo` 预设中观察原始数据 |
+| `raw` | TCP 下每个数据块当作一帧；MQTT 不使用此分帧器，每条 PUBLISH 已有明确消息边界 |
 | `delimiter` | 按分隔符切分；`delimiterFormat: text` 时 `delimiter` 是 UTF-8 文本（如 `"|"`、`"\r\n"`），`hex` 时是十六进制（如 `"7C"`、`"0D0A"`）；省略格式按 `hex` 兼容旧配置。`includeDelimiter` 控制是否保留分隔符 |
 | `length-prefix` | 从指定偏移读取 1/2/4 字节长度，`adjust` 用于修正“长度是否包含头/CRC” |
 | `fixed` | 固定帧长，不足时等待后续数据 |
@@ -288,7 +337,7 @@ codec:
 - 满足 `session.trackMessages` 的报文发送后进入待确认队列；收到 `session.ackMessage` 中相同流水号且状态在 `successValues` 内的 ACK 后清除。
 - `timeoutMs` 内未确认会重发同一份原始字节，最多重发 `maxRetries` 次；重试耗尽产生 error 事件和系统流量。
 - 非 OK ACK 保留待确认并继续等待重试；未知 ACK 只记 info。
-- TCP Client 断线时暂停计时器；重连后先执行 `on: connect` 注册/握手，再按顺序恢复未确认报文。TCP Server 某客户端断开时丢弃该连接的 pending。
+- TCP Client 和 MQTT Client 断线时暂停计时器；重连后先执行 `on: connect` 注册/握手，再按顺序恢复未确认报文。TCP Server 或内嵌 MQTT Broker 的客户端断开时丢弃该连接的 pending。
 - 多连接时每个连接独立确认，互不影响。
 
 **数组字段 波形**：
@@ -416,7 +465,7 @@ match:
 ## 项目结构
 
 ```text
-packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP Server/Client transport
+packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP 与 MQTT transport
 packages/server    Fastify REST + WebSocket + JSON 持久化 + 静态托管
 packages/web       React + Vite + Tailwind 控制台
 presets/           内置 YAML 预设
@@ -447,12 +496,13 @@ pnpm start           # 生产模式（需要先 build）
 - 全局数据字典：schema/ID 校验、引用收集、内联字典迁移、已有字典匹配、ID 冲突、无效数据保留、运行时实时 provider
 - 服务端字典仓库与设备存储：本机字典加载与 CRUD、损坏备份、启动迁移、备份文件、幂等和跨设备前向引用
 - 文本 codec 集成：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
-- ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP Client 暂停/重连恢复、TCP Server 断连丢弃、stop 清理
+- ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP/MQTT Client 暂停与重连恢复、TCP Server/MQTT Broker 断连丢弃、stop 清理
 - 数组字段：int16 BE、CRC16/Modbus 已知向量、hex/base64 round-trip、CRC 失败丢弃、CRC 字节序
 - 模板求值（路径、算术、比较、布尔函数、插值扫描、错误和限制）、模板补全 token/候选/插入，以及字段匹配
 - 真实 `node:net` 客户端连 TCP 设备：握手、请求响应、手动发送、错误 CRC 不触发规则
 - TCP Client 传输：目标未启动时正常启动、自动重连、主动断开暂停、关闭重连、收发与字节计数
 - TCP Client 设备运行时集成：重连后重新执行 `on: connect`、断线发送报错、设备状态保持 `running`
+- MQTT Client 与内嵌 Broker：QoS 0/1 收发、共享认证、TLS 文件错误、重连、多客户端、主题规则过滤与覆盖、应用层 ACK 重试
 - 设备信息 `deviceInfo` 的 schema 解析和 Web 端元数据归一化/摘要
 - Web 端配置默认值、传输展示/状态文案、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
 
@@ -473,18 +523,18 @@ pnpm start           # 生产模式（需要先 build）
 
 | 里程碑 | 内容 |
 | --- | --- |
-| **M2 传输扩展（进行中）** | TCP Server / TCP Client（已支持）；UDP（下一阶段）、串口；MQTT broker/client；HTTP server；WebSocket server；虚拟串口（Linux/macOS socat，Windows com0com） |
+| **M2 传输扩展（进行中）** | TCP Server / TCP Client / MQTT Broker / MQTT Client（已支持）；UDP（下一阶段）、串口、HTTP server、WebSocket server、虚拟串口（Linux/macOS socat，Windows com0com） |
 | **M3 Modbus** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
 | **M4 可靠性** | JS script codec（worker + vm）、故障注入（延迟/丢包/断连/损坏）、透明代理、录制回放、虚拟时钟、多设备场景、CI |
 | **更远** | CoAP、OPC UA、BACnet、BLE、pcapng 导出、可视化协议编辑器、Docker 发行 |
 
 ## 已知限制
 
-- 当前只实现 TCP Server / TCP Client transport；TCP Client 为单目标，UDP、串口、MQTT、HTTP/WebSocket 仍在路线图中。
+- TCP Client 为单目标。MQTT 仅支持 3.1.1 与 QoS 0/1；UDP、串口、HTTP/WebSocket 仍在路线图中。
 - 配置会持久化；**报文历史和运行时状态不会跨服务重启保留**。重启后状态回到配置中的 `state`。
 - 可视化编辑会重新生成 YAML，源码模式中的注释和原格式只在当前编辑会话、且未做可视化修改时保留；服务端本身只存 JSON。
 - 模板补全只在可视化模板输入中提供；YAML/JSON 源码模式没有补全。
-- 没有 TLS、认证和多用户；控制面默认只绑定 `127.0.0.1`，不要直接暴露到公网。
+- TCP transport 不提供 TLS 或认证；MQTT Client 支持 mqtts 和 CA 文件，内嵌 Broker 支持 mqtts 与单组共享凭据。控制面默认只绑定 `127.0.0.1`，不要直接暴露到公网。
 - `raw` framing 在 TCP 上把每个数据块当作一帧，不保证与业务消息边界一致；带明确边界的协议请使用 length-prefix/delimiter/fixed。
 - JS script codec、录制回放、故障注入尚未实现；当前 UI 中的协议标签已标注“规划中”。
 - 所有数据字典均为本机自定义数据，保存在 Git 忽略的 `data/dictionaries.json`。被设备引用的字典不能删除。
