@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceConfigSchema } from '@deviceforge/core';
 import type { FastifyInstance } from 'fastify';
 import Fastify from 'fastify';
+import { DeviceConfigApplicationService } from '../application/device-config-service';
 import { registerDeviceRoutes } from '../routes/devices';
 import { RuntimeManager } from '../runtime-manager';
 import { DeviceStore } from '../store/device-store';
@@ -67,7 +68,8 @@ async function register(
   dictionaries: DictionaryStore,
   recordings: RecordingStore,
 ) {
-  await registerDeviceRoutes(app, manager, dictionaries, recordings);
+  const configs = new DeviceConfigApplicationService(manager, dictionaries);
+  await registerDeviceRoutes(app, manager, configs, recordings);
   await app.ready();
 }
 

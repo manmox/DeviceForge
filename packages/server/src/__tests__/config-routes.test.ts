@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
+import { DeviceConfigApplicationService } from '../application/device-config-service';
+import { PresetApplicationService } from '../application/preset-service';
 import { registerConfigRoutes } from '../routes/config';
+import { RuntimeManager } from '../runtime-manager';
+import { DeviceStore } from '../store/device-store';
 import { DictionaryStore } from '../store/dictionary-store';
 
 const directories: string[] = [];
@@ -53,8 +57,14 @@ describe('配置校验 API', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'deviceforge-config-routes-'));
     directories.push(dir);
     const dictionaries = new DictionaryStore(path.join(dir, 'dictionaries.json'));
+    const manager = new RuntimeManager(
+      new DeviceStore(path.join(dir, 'devices.json'), dictionaries),
+      dictionaries.provider(),
+    );
+    const configs = new DeviceConfigApplicationService(manager, dictionaries);
+    const presets = new PresetApplicationService(path.join(dir, 'presets'), dictionaries);
     const app = Fastify();
-    await registerConfigRoutes(app, dictionaries);
+    await registerConfigRoutes(app, configs, presets);
     await app.ready();
 
     const response = await app.inject({
@@ -75,10 +85,16 @@ describe('配置校验 API', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'deviceforge-config-routes-'));
     directories.push(dir);
     const dictionaries = new DictionaryStore(path.join(dir, 'dictionaries.json'));
+    const manager = new RuntimeManager(
+      new DeviceStore(path.join(dir, 'devices.json'), dictionaries),
+      dictionaries.provider(),
+    );
+    const configs = new DeviceConfigApplicationService(manager, dictionaries);
+    const presets = new PresetApplicationService(path.join(dir, 'presets'), dictionaries);
     const config = legacyTextDevice();
     delete (config.codec as { dictionaries?: unknown }).dictionaries;
     const app = Fastify();
-    await registerConfigRoutes(app, dictionaries);
+    await registerConfigRoutes(app, configs, presets);
     await app.ready();
 
     const response = await app.inject({

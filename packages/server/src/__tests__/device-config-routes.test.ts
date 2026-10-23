@@ -10,6 +10,7 @@ import { registerDeviceRoutes } from '../routes/devices';
 import { RuntimeManager } from '../runtime-manager';
 import { DeviceStore } from '../store/device-store';
 import { DictionaryStore } from '../store/dictionary-store';
+import { RecordingStore } from '../store/recording-store';
 
 const directories: string[] = [];
 
@@ -17,13 +18,14 @@ function setup() {
   const directory = mkdtempSync(path.join(tmpdir(), 'deviceforge-device-routes-'));
   directories.push(directory);
   const dictionaries = new DictionaryStore(path.join(directory, 'dictionaries.json'));
+  const recordings = new RecordingStore(path.join(directory, 'recordings'));
   const manager = new RuntimeManager(
     new DeviceStore(path.join(directory, 'devices.json'), dictionaries),
     dictionaries.provider(),
   );
   const configs = new DeviceConfigApplicationService(manager, dictionaries);
   const app = Fastify();
-  return { app, configs, dictionaries, manager, presets: new PresetApplicationService(
+  return { app, configs, dictionaries, manager, recordings, presets: new PresetApplicationService(
     path.join(directory, 'presets'), dictionaries,
   ) };
 }
@@ -36,9 +38,9 @@ afterEach(() => {
 
 describe('REST 设备配置路由', () => {
   it('与 MCP 共用设备配置服务的校验、字典迁移和重复 ID 规则', async () => {
-    const { app, configs, dictionaries, manager, presets } = setup();
+    const { app, configs, dictionaries, manager, presets, recordings } = setup();
     await registerConfigRoutes(app, configs, presets);
-    await registerDeviceRoutes(app, manager, configs);
+    await registerDeviceRoutes(app, manager, configs, recordings);
     await app.ready();
 
     const config = {

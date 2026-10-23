@@ -23,6 +23,7 @@ function capabilities(root: string, calls: string[] = []): McpCapabilities {
     endpoints: [],
     connections: [],
     counters: { rxBytes: 0, txBytes: 0, rxFrames: 0, txFrames: 0 },
+    faultInjectionEnabled: false,
   };
   return {
     projectFiles: new ProjectFileApplicationService(root),
