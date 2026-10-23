@@ -19,11 +19,10 @@ export type {
 };
 
 export interface DictionarySummary {
-  id: string;
-  name: string;
-  description?: string;
+  id: GlobalDictionaryDefinition['id'];
+  name: GlobalDictionaryDefinition['name'];
+  description?: GlobalDictionaryDefinition['description'];
   entries: Record<string, TextDictionaryEntry>;
-  builtin: boolean;
   usedBy: { id: string; name: string }[];
 }
 
@@ -32,10 +31,7 @@ export type DictionaryRegistry = ReadonlyMap<
   GlobalDictionaryDefinition
 >;
 
-export type DictionaryInput = Omit<
-  DictionarySummary,
-  'builtin' | 'usedBy'
->;
+export type DictionaryInput = GlobalDictionaryDefinition;
 
 export interface DeviceSummary {
   config: DeviceConfig;

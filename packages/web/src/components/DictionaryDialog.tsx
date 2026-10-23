@@ -5,10 +5,11 @@ import {
 import {
   BookOpen,
   Check,
-  Copy,
+  Code2,
   Loader2,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
@@ -20,10 +21,18 @@ import type {
   DictionarySummary,
   ValidationIssue,
 } from '../types';
+import {
+  entriesToVisualRows,
+  parseDictionaryEntries,
+  visualRowsToEntries,
+  type DictionaryVisualRow,
+} from '../lib/dictionary-editor';
 import { CodeEditor } from './CodeEditor';
+import { DictionaryVisualEditor } from './DictionaryVisualEditor';
 import {
   FormField,
   InlineWarning,
+  SegmentedControl,
   TextArea,
   TextInput,
 } from './form/FormControls';
@@ -34,7 +43,7 @@ interface DictionaryDraft {
   name: string;
   description: string;
   entriesText: string;
-  builtin: boolean;
+  rows: DictionaryVisualRow[];
 }
 
 function errorText(error: unknown): string {
@@ -47,7 +56,7 @@ function toDraft(dictionary: DictionarySummary): DictionaryDraft {
     name: dictionary.name,
     description: dictionary.description ?? '',
     entriesText: JSON.stringify(dictionary.entries, null, 2),
-    builtin: dictionary.builtin,
+    rows: entriesToVisualRows(dictionary.entries),
   };
 }
 
@@ -81,6 +90,7 @@ export function DictionaryDialog() {
   );
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<DictionaryDraft | null>(null);
+  const [editorMode, setEditorMode] = useState<'visual' | 'json'>('visual');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
@@ -97,9 +107,6 @@ export function DictionaryDialog() {
         dictionary.id.toLowerCase().includes(keyword),
     );
   }, [dictionaries, search]);
-  const builtinDictionaries = filtered.filter((dictionary) => dictionary.builtin);
-  const userDictionaries = filtered.filter((dictionary) => !dictionary.builtin);
-
   function canDiscard(): boolean {
     if (saving) return false;
     if (!dirty) return true;
@@ -150,6 +157,7 @@ export function DictionaryDialog() {
     if (loadedIdRef.current === selected.id) return;
     loadedIdRef.current = selected.id;
     setDraft(toDraft(selected));
+    setEditorMode('visual');
     setDirty(false);
     setIssues([]);
     setError(null);
@@ -158,6 +166,60 @@ export function DictionaryDialog() {
   function patch(partial: Partial<DictionaryDraft>) {
     setDraft((current) => (current ? { ...current, ...partial } : current));
     setDirty(true);
+    setIssues([]);
+    setError(null);
+  }
+
+  function patchRows(rows: DictionaryVisualRow[]) {
+    patch({
+      rows,
+      entriesText: JSON.stringify(visualRowsToEntries(rows), null, 2),
+    });
+  }
+
+  function switchEditorMode(nextMode: 'visual' | 'json') {
+    if (!draft || nextMode === editorMode) return;
+
+    if (nextMode === 'json') {
+      const rowIssues: ValidationIssue[] = [];
+      const seen = new Set<string>();
+      for (const row of draft.rows) {
+        if (row.code.trim() === '') {
+          rowIssues.push({ path: 'entries', message: '条目码值不能为空' });
+        } else if (seen.has(row.code)) {
+          rowIssues.push({ path: `entries.${row.code}`, message: `码值 ${row.code} 重复` });
+        }
+        seen.add(row.code);
+      }
+      if (rowIssues.length > 0) {
+        setIssues(rowIssues);
+        setError('请先修正可视化表格中的码值。');
+        return;
+      }
+      const entries = visualRowsToEntries(draft.rows);
+      setDraft((current) => current
+        ? { ...current, entriesText: JSON.stringify(entries, null, 2) }
+        : current);
+      setEditorMode('json');
+      setIssues([]);
+      setError(null);
+      return;
+    }
+
+    const parsed = parseDictionaryEntries(draft.entriesText);
+    if (!parsed.success) {
+      setIssues(parsed.issues);
+      setError('JSON 内容无效，修正后才能切换到可视化视图。');
+      return;
+    }
+    setDraft((current) => current
+      ? {
+          ...current,
+          rows: entriesToVisualRows(parsed.data),
+          entriesText: JSON.stringify(parsed.data, null, 2),
+        }
+      : current);
+    setEditorMode('visual');
     setIssues([]);
     setError(null);
   }
@@ -178,24 +240,9 @@ export function DictionaryDialog() {
       name: '新数据字典',
       description: '',
       entriesText: '{}',
-      builtin: false,
+      rows: [],
     });
-    setDirty(false);
-    setIssues([]);
-    setError(null);
-  }
-
-  function duplicateSelected() {
-    if (!selected || !canDiscard()) return;
-    setCreating(true);
-    setSelectedId(null);
-    setDraft({
-      id: uniqueDictionaryId(`${selected.id}-copy`, dictionaries),
-      name: `${selected.name} 副本`,
-      description: selected.description ?? '',
-      entriesText: JSON.stringify(selected.entries, null, 2),
-      builtin: false,
-    });
+    setEditorMode('visual');
     setDirty(false);
     setIssues([]);
     setError(null);
@@ -206,6 +253,7 @@ export function DictionaryDialog() {
     const fallback = dictionaries[0];
     setSelectedId(fallback?.id ?? null);
     setDraft(fallback ? toDraft(fallback) : null);
+    setEditorMode('visual');
     setDirty(false);
     setIssues([]);
     setError(null);
@@ -237,9 +285,23 @@ export function DictionaryDialog() {
       nextIssues.push({ path: 'name', message: '名称不能为空' });
     }
     let entries: DictionaryInput['entries'] | undefined;
-    try {
-      const parsedJson: unknown = JSON.parse(draft.entriesText);
-      const entriesResult = DictionaryEntriesSchema.safeParse(parsedJson);
+    if (editorMode === 'json') {
+      const parsed = parseDictionaryEntries(draft.entriesText);
+      if (!parsed.success) nextIssues.push(...parsed.issues);
+      else entries = parsed.data;
+    } else {
+      const seen = new Set<string>();
+      for (const row of draft.rows) {
+        if (row.code.trim() === '') {
+          nextIssues.push({ path: 'entries', message: '条目码值不能为空' });
+        } else if (seen.has(row.code)) {
+          nextIssues.push({ path: `entries.${row.code}`, message: `码值 ${row.code} 重复` });
+        }
+        seen.add(row.code);
+      }
+      const entriesResult = DictionaryEntriesSchema.safeParse(
+        visualRowsToEntries(draft.rows),
+      );
       if (!entriesResult.success) {
         nextIssues.push(...zodIssues(entriesResult.error).map((issue) => ({
           ...issue,
@@ -248,11 +310,6 @@ export function DictionaryDialog() {
       } else {
         entries = entriesResult.data;
       }
-    } catch (parseError) {
-      nextIssues.push({
-        path: 'entries',
-        message: `JSON 解析失败：${errorText(parseError)}`,
-      });
     }
 
     if (!idResult.success || nextIssues.length > 0 || !entries) {
@@ -299,7 +356,7 @@ export function DictionaryDialog() {
   }
 
   async function remove() {
-    if (!selected || selected.builtin) return;
+    if (!selected) return;
     if (selected.usedBy.length > 0) {
       setError(
         `字典仍被 ${selected.usedBy.length} 台设备引用：${selected.usedBy
@@ -319,6 +376,7 @@ export function DictionaryDialog() {
       setSelectedId(fallback?.id ?? null);
       setDraft(fallback ? toDraft(fallback) : null);
       loadedIdRef.current = fallback?.id ?? null;
+      setEditorMode('visual');
       setDirty(false);
       setIssues([]);
     } catch (caught) {
@@ -328,7 +386,7 @@ export function DictionaryDialog() {
     }
   }
 
-  const readOnly = draft?.builtin === true || saving;
+  const readOnly = saving;
 
   return (
     <div
@@ -346,7 +404,7 @@ export function DictionaryDialog() {
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-mist-100">数据字典</div>
             <div className="text-[10.5px] text-mist-500">
-              全局码表；设备只保存 ID，编辑后对运行中的设备立即生效
+              仅保存在本机；设备只保存 ID，修改后立即生效
             </div>
           </div>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-mist-500" />}
@@ -385,18 +443,10 @@ export function DictionaryDialog() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 pb-3">
-              {builtinDictionaries.length > 0 && (
+              {filtered.length > 0 && (
                 <DictionaryGroup
-                  title="内置字典"
-                  dictionaries={builtinDictionaries}
-                  selectedId={selectedId}
-                  onSelect={selectDictionary}
-                />
-              )}
-              {userDictionaries.length > 0 && (
-                <DictionaryGroup
-                  title="自定义字典"
-                  dictionaries={userDictionaries}
+                  title="本机字典"
+                  dictionaries={filtered}
                   selectedId={selectedId}
                   onSelect={selectDictionary}
                 />
@@ -423,27 +473,15 @@ export function DictionaryDialog() {
                     {draft.name || '未命名字典'}
                   </h3>
                   <span className="chip font-mono text-[10px]">{draft.id}</span>
-                  <span
-                    className={`chip text-[10px] ${
-                      draft.builtin
-                        ? 'border-sky-400/20 text-sky-300'
-                        : 'border-accent-500/20 text-accent-300'
-                    }`}
-                  >
-                    {draft.builtin ? '内置 · 只读' : creating ? '新建' : '自定义'}
+                  <span className="chip border-accent-500/20 text-[10px] text-accent-300">
+                    {creating ? '新建' : '本机自定义'}
                   </span>
-                  {dirty && !draft.builtin && (
+                  {dirty && (
                     <span className="chip border-amber-400/20 text-[10px] text-amber-300">
                       未保存
                     </span>
                   )}
                 </div>
-
-                {draft.builtin && (
-                  <div className="rounded-lg border border-sky-400/20 bg-sky-400/[0.05] px-3 py-2 text-[10.5px] leading-4 text-sky-200">
-                    内置字典由仓库的 dictionaries/*.yaml 提供，Web 中只读。需要修改时复制为自定义字典。
-                  </div>
-                )}
 
                 <div className="grid gap-2.5 sm:grid-cols-2">
                   <FormField label="字典 ID" hint="字母/数字/_/-，创建后不可修改。">
@@ -475,34 +513,69 @@ export function DictionaryDialog() {
                   />
                 </FormField>
 
-                <FormField
-                  label="条目 JSON"
-                  hint="数据码 → { name, unit, multi, description, valueFormat }"
-                >
-                  <CodeEditor
-                    value={draft.entriesText}
-                    onChange={(entriesText) => patch({ entriesText })}
-                    language="json"
-                    height="360px"
-                    readOnly={readOnly}
-                    ariaLabel="数据字典条目 JSON"
-                  />
-                </FormField>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] font-medium text-mist-400">字典内容</div>
+                      <div className="mt-0.5 text-[10px] text-mist-500">
+                        可视化表格和 JSON 源码编辑同一份草稿。
+                      </div>
+                    </div>
+                    <SegmentedControl
+                      ariaLabel="字典编辑视图"
+                      value={editorMode}
+                      onChange={switchEditorMode}
+                      disabled={saving}
+                      size="sm"
+                      options={[
+                        {
+                          value: 'visual',
+                          label: '可视化',
+                          icon: <SlidersHorizontal className="h-3.5 w-3.5" />,
+                        },
+                        {
+                          value: 'json',
+                          label: 'JSON 源码',
+                          icon: <Code2 className="h-3.5 w-3.5" />,
+                        },
+                      ]}
+                    />
+                  </div>
+                  {editorMode === 'visual' ? (
+                    <DictionaryVisualEditor
+                      rows={draft.rows}
+                      onChange={patchRows}
+                      disabled={readOnly}
+                    />
+                  ) : (
+                    <FormField
+                      label="条目 JSON"
+                      hint="数据码 → { name, unit, multi, description, valueFormat }"
+                    >
+                      <CodeEditor
+                        value={draft.entriesText}
+                        onChange={(entriesText) => patch({ entriesText })}
+                        language="json"
+                        height="420px"
+                        readOnly={readOnly}
+                        ariaLabel="数据字典条目 JSON"
+                      />
+                    </FormField>
+                  )}
+                </div>
 
                 {error && <InlineWarning>{error}</InlineWarning>}
                 <ValidationIssues issues={issues} />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
                   <div className="text-[10.5px] leading-4 text-mist-500">
-                    {selected && !draft.builtin
+                    {selected
                       ? selected.usedBy.length > 0
                         ? `被 ${selected.usedBy.length} 台设备引用：${selected.usedBy
                             .map((device) => device.name)
                             .join('、')}`
                         : '当前没有设备引用此字典'
-                      : draft.builtin
-                        ? '内置字典不可删除或修改'
-                        : '保存后即可在设备 repeat 中选择'}
+                      : '保存后即可在设备 repeat 中选择'}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {creating ? (
@@ -513,16 +586,6 @@ export function DictionaryDialog() {
                         disabled={saving}
                       >
                         取消
-                      </button>
-                    ) : draft.builtin ? (
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={duplicateSelected}
-                        disabled={saving}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        复制为自定义
                       </button>
                     ) : (
                       <button
@@ -535,21 +598,19 @@ export function DictionaryDialog() {
                         删除
                       </button>
                     )}
-                    {!draft.builtin && (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void save()}
-                        disabled={saving || !dirty && !creating}
-                      >
-                        {saving ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Check className="h-3.5 w-3.5" />
-                        )}
-                        保存
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void save()}
+                      disabled={saving || !dirty && !creating}
+                    >
+                      {saving ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      保存
+                    </button>
                   </div>
                 </div>
               </div>
@@ -594,9 +655,6 @@ function DictionaryGroup({
                 <span className="min-w-0 flex-1 truncate text-xs text-mist-200">
                   {dictionary.name}
                 </span>
-                {dictionary.builtin && (
-                  <span className="chip shrink-0 text-[9px]">内置</span>
-                )}
               </div>
               <div className="mt-0.5 flex items-center gap-2 text-[10px] text-mist-500">
                 <span className="truncate font-mono">{dictionary.id}</span>

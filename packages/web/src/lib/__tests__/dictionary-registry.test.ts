@@ -9,7 +9,6 @@ describe('dictionaryRegistryOf', () => {
         id: 'codes',
         name: '码表',
         entries: { '000': { name: '电压' } },
-        builtin: false,
         usedBy: [],
       },
     ];
@@ -24,14 +23,12 @@ describe('dictionaryRegistryOf', () => {
         id: 'codes',
         name: '旧',
         entries: {},
-        builtin: false,
         usedBy: [],
       },
       {
         id: 'codes',
         name: '新',
         entries: {},
-        builtin: false,
         usedBy: [],
       },
     ]);
