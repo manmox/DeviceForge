@@ -23,9 +23,52 @@ const StoreFileSchema = z.object({
 });
 
 function rawId(raw: unknown): string | undefined {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
   const id = (raw as Record<string, unknown>).id;
   return typeof id === 'string' ? id : undefined;
+}
+
+function rawName(raw: unknown): string | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const name = (raw as Record<string, unknown>).name;
+  return typeof name === 'string' ? name : undefined;
+}
+
+function rawDictionaryIds(raw: unknown): string[] {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const codec = (raw as Record<string, unknown>).codec;
+  if (codec === null || typeof codec !== 'object' || Array.isArray(codec)) return [];
+  const codecRecord = codec as Record<string, unknown>;
+  if (codecRecord.type !== 'text' || !Array.isArray(codecRecord.messages)) return [];
+
+  const ids = new Set<string>();
+  for (const message of codecRecord.messages) {
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+      continue;
+    }
+    const slots = (message as Record<string, unknown>).slots;
+    if (!Array.isArray(slots)) continue;
+    for (const slot of slots) {
+      if (slot === null || typeof slot !== 'object' || Array.isArray(slot)) {
+        continue;
+      }
+      const record = slot as Record<string, unknown>;
+      if (record.kind === 'repeat' && typeof record.dictionary === 'string') {
+        ids.add(record.dictionary);
+      }
+    }
+  }
+  return [...ids];
+}
+
+export interface InvalidDeviceDictionaryReference {
+  dictionaryId: string;
+  deviceId: string;
+  deviceName: string;
 }
 
 interface LoadedDevice {
@@ -49,6 +92,29 @@ export class DeviceStore {
     return [...this.devices.values()];
   }
 
+  /**
+   * 无效设备暂不自动重试，必须修复配置并重启服务。它们仍受字典删除保护，
+   * 避免跳过的原始记录继续引用某字典时，该字典被误删。
+   */
+  invalidDictionaryReferences(): InvalidDeviceDictionaryReference[] {
+    const references: InvalidDeviceDictionaryReference[] = [];
+    this.invalidRecords.forEach((record, index) => {
+      const ids = rawDictionaryIds(record);
+      if (ids.length === 0) return;
+
+      const rawDeviceId = rawId(record);
+      const rawDeviceName = rawName(record);
+      const deviceId = rawDeviceId ?? `invalid-record-${index + 1}`;
+      const deviceName = rawDeviceName
+        ? `${rawDeviceName}（配置无效）`
+        : `无效设备记录 ${index + 1}`;
+      for (const dictionaryId of ids) {
+        references.push({ dictionaryId, deviceId, deviceName });
+      }
+    });
+    return references;
+  }
+
   get(id: string): DeviceConfig | undefined {
     return this.devices.get(id);
   }
@@ -57,24 +123,56 @@ export class DeviceStore {
     return this.devices.has(id);
   }
 
+  hasStoredId(id: string): boolean {
+    return this.devices.has(id) || this.invalidRecords.some(
+      (record) => rawId(record) === id,
+    );
+  }
+
+  hasInvalidRecord(id: string): boolean {
+    return this.invalidRecords.some((record) => rawId(record) === id);
+  }
+
   create(config: DeviceConfig): DeviceConfig {
-    if (this.devices.has(config.id)) throw new Error(`设备 ${config.id} 已存在`);
+    if (this.hasStoredId(config.id)) throw new Error(`设备 ${config.id} 已存在`);
     this.devices.set(config.id, config);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.devices.delete(config.id);
+      throw error;
+    }
     return config;
   }
 
   update(id: string, config: DeviceConfig): DeviceConfig {
     if (!this.devices.has(id)) throw new Error(`设备 ${id} 不存在`);
     if (config.id !== id) throw new Error('不能修改设备 ID');
+    if (this.hasInvalidRecord(id)) {
+      throw new Error(`设备 ${id} 还有同 ID 的无效配置记录，请先修复 devices.json`);
+    }
+    const previous = this.devices.get(id)!;
     this.devices.set(id, config);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.devices.set(id, previous);
+      throw error;
+    }
     return config;
   }
 
   delete(id: string): boolean {
+    const previous = this.devices.get(id);
     const deleted = this.devices.delete(id);
-    if (deleted) this.save();
+    if (deleted) {
+      try {
+        this.save();
+      } catch (error) {
+        this.devices.set(id, previous!);
+        throw error;
+      }
+    }
     return deleted;
   }
 

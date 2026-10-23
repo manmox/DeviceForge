@@ -19,14 +19,24 @@ interface Usage {
 
 function usageByDevice(store: DeviceStore): Map<string, Usage[]> {
   const usage = new Map<string, Usage[]>();
+  const addUsage = (dictionaryId: string, device: Usage) => {
+    const list = usage.get(dictionaryId) ?? [];
+    if (!list.some((item) => item.id === device.id)) {
+      list.push(device);
+    }
+    usage.set(dictionaryId, list);
+  };
+
   for (const config of store.list()) {
     for (const reference of collectDictionaryReferences(config)) {
-      const list = usage.get(reference.dictionaryId) ?? [];
-      if (!list.some((item) => item.id === config.id)) {
-        list.push({ id: config.id, name: config.name });
-      }
-      usage.set(reference.dictionaryId, list);
+      addUsage(reference.dictionaryId, { id: config.id, name: config.name });
     }
+  }
+  for (const reference of store.invalidDictionaryReferences()) {
+    addUsage(reference.dictionaryId, {
+      id: reference.deviceId,
+      name: reference.deviceName,
+    });
   }
   return usage;
 }

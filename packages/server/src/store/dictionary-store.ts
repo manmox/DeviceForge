@@ -63,6 +63,7 @@ function sameDefinition(
   left: GlobalDictionaryDefinition,
   right: GlobalDictionaryDefinition,
 ): boolean {
+  // 内联字典迁移只负责合并码表条目；原字典的名称和说明属于用户元数据。
   return canonical(left.entries) === canonical(right.entries);
 }
 
@@ -93,11 +94,22 @@ export class DictionaryStore implements DictionaryRepository {
 
   create(definition: GlobalDictionaryDefinition): GlobalDictionaryDefinition {
     const parsed = GlobalDictionaryDefinitionSchema.parse(definition);
-    if (this.has(parsed.id)) {
-      throw new DictionaryStoreError(`字典 ${parsed.id} 已存在`, 409);
+    const conflict = this.findCaseInsensitive(parsed.id);
+    if (conflict) {
+      throw new DictionaryStoreError(
+        conflict === parsed.id
+          ? `字典 ${parsed.id} 已存在`
+          : `字典 ID ${parsed.id} 与现有字典 ${conflict} 仅大小写不同`,
+        409,
+      );
     }
     this.users.set(parsed.id, parsed);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.users.delete(parsed.id);
+      throw error;
+    }
     this.emitChange();
     return parsed;
   }
@@ -113,8 +125,21 @@ export class DictionaryStore implements DictionaryRepository {
       throw new DictionaryStoreError('不能修改字典 ID', 400);
     }
     const parsed = GlobalDictionaryDefinitionSchema.parse(definition);
+    const conflict = this.findCaseInsensitive(id, id);
+    if (conflict) {
+      throw new DictionaryStoreError(
+        `字典 ID ${id} 与现有字典 ${conflict} 仅大小写不同`,
+        409,
+      );
+    }
+    const previous = this.users.get(id)!;
     this.users.set(id, parsed);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.users.set(id, previous);
+      throw error;
+    }
     this.emitChange();
     return parsed;
   }
@@ -123,8 +148,14 @@ export class DictionaryStore implements DictionaryRepository {
     if (!this.users.has(id)) {
       throw new DictionaryStoreError(`字典 ${id} 不存在`, 404);
     }
+    const previous = this.users.get(id)!;
     this.users.delete(id);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.users.set(id, previous);
+      throw error;
+    }
     this.emitChange();
     return true;
   }
@@ -132,31 +163,27 @@ export class DictionaryStore implements DictionaryRepository {
   importDefinitions(
     definitions: Iterable<GlobalDictionaryDefinition>,
   ): GlobalDictionaryDefinition[] {
-    const parsedDefinitions = [...definitions].map((definition) =>
-      GlobalDictionaryDefinitionSchema.parse(definition),
-    );
-    const added: GlobalDictionaryDefinition[] = [];
-    for (const parsed of parsedDefinitions) {
-      const existing = this.get(parsed.id);
-      if (existing) {
-        if (!sameDefinition(existing, parsed)) {
-          throw new DictionaryStoreError(`字典 ${parsed.id} 内容冲突`, 409);
-        }
-        continue;
-      }
-      if (added.some((item) => item.id === parsed.id)) {
-        throw new DictionaryStoreError(`字典 ${parsed.id} 重复`, 409);
-      }
-      added.push(parsed);
-    }
+    const added = this.prepareDefinitions(definitions);
     if (added.length > 0) {
       for (const definition of added) {
         this.users.set(definition.id, definition);
       }
-      this.save();
+      try {
+        this.save();
+      } catch (error) {
+        for (const definition of added) this.users.delete(definition.id);
+        throw error;
+      }
       this.emitChange();
     }
     return added;
+  }
+
+  /** 验证批量迁入定义，保证设备存储前能发现所有 ID/内容冲突。 */
+  validateImportDefinitions(
+    definitions: Iterable<GlobalDictionaryDefinition>,
+  ): void {
+    this.prepareDefinitions(definitions);
   }
 
   provider(): DictionaryProvider {
@@ -186,6 +213,14 @@ export class DictionaryStore implements DictionaryRepository {
         if (this.users.has(definition.data.id)) {
           console.warn(
             `[dictionaries] 用户字典 ${definition.data.id} 重复，已跳过`,
+          );
+          this.invalidUserRecords.push(item);
+          continue;
+        }
+        const conflict = this.findCaseInsensitive(definition.data.id);
+        if (conflict) {
+          console.warn(
+            `[dictionaries] 用户字典 ${definition.data.id} 与 ${conflict} 仅大小写不同，已跳过`,
           );
           this.invalidUserRecords.push(item);
           continue;
@@ -222,5 +257,44 @@ export class DictionaryStore implements DictionaryRepository {
 
   private emitChange(): void {
     for (const listener of this.listeners) listener();
+  }
+
+  private findCaseInsensitive(id: string, exceptId?: string): string | undefined {
+    const normalized = id.toLowerCase();
+    return [...this.users.keys()].find(
+      (existing) =>
+        existing !== exceptId && existing.toLowerCase() === normalized,
+    );
+  }
+
+  private prepareDefinitions(
+    definitions: Iterable<GlobalDictionaryDefinition>,
+  ): GlobalDictionaryDefinition[] {
+    const parsedDefinitions = [...definitions].map((definition) =>
+      GlobalDictionaryDefinitionSchema.parse(definition),
+    );
+    const added: GlobalDictionaryDefinition[] = [];
+    for (const parsed of parsedDefinitions) {
+      const existing = this.get(parsed.id);
+      if (existing) {
+        if (!sameDefinition(existing, parsed)) {
+          throw new DictionaryStoreError(`字典 ${parsed.id} 内容冲突`, 409);
+        }
+        continue;
+      }
+      const conflict =
+        this.findCaseInsensitive(parsed.id) ??
+        added.find((item) => item.id.toLowerCase() === parsed.id.toLowerCase())?.id;
+      if (conflict) {
+        throw new DictionaryStoreError(
+          conflict === parsed.id
+            ? `字典 ${parsed.id} 重复`
+            : `字典 ID ${parsed.id} 与现有字典 ${conflict} 仅大小写不同`,
+          409,
+        );
+      }
+      added.push(parsed);
+    }
+    return added;
   }
 }

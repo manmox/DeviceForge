@@ -9,7 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DictionaryEntries } from '@deviceforge/core';
+import { DeviceConfigSchema, type DictionaryEntries } from '@deviceforge/core';
 import { DeviceStore } from '../store/device-store';
 import { DictionaryStore } from '../store/dictionary-store';
 
@@ -158,6 +158,11 @@ describe('DeviceStore dictionary migration', () => {
     const dictionaries = new DictionaryStore(dictionariesFile);
     const store = new DeviceStore(devicesFile, dictionaries);
     expect(store.list().map((item) => item.id)).toEqual(['good']);
+    expect(store.hasStoredId('bad')).toBe(true);
+    expect(store.hasInvalidRecord('bad')).toBe(true);
+    expect(() => store.create(DeviceConfigSchema.parse(textDevice('bad')))).toThrow(
+      '设备 bad 已存在',
+    );
     expect(existsSync(devicesFile)).toBe(true);
     const rewritten = readEnvelope(devicesFile);
     expect(rewritten.devices).toHaveLength(2);

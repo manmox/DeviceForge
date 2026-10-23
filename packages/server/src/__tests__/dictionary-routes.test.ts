@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -75,6 +75,13 @@ describe('字典 API', () => {
     expect(created.statusCode).toBe(201);
     expect(created.json().dictionary).not.toHaveProperty('builtin');
 
+    const caseConflict = await app.inject({
+      method: 'POST',
+      url: '/api/dictionaries',
+      payload: { ...definition, id: 'SAMPLE-CODES' },
+    });
+    expect(caseConflict.statusCode).toBe(409);
+
     const updated = await app.inject({
       method: 'PUT',
       url: '/api/dictionaries/sample-codes',
@@ -127,6 +134,37 @@ describe('字典 API', () => {
       url: '/api/dictionaries/unused',
     });
     expect(missing.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('无效设备记录引用的字典也不能删除', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'deviceforge-invalid-dictionary-reference-'));
+    directories.push(dir);
+    const dictionaries = new DictionaryStore(path.join(dir, 'dictionaries.json'));
+    writeFileSync(
+      path.join(dir, 'devices.json'),
+      JSON.stringify({ version: 1, devices: [referencingDevice('sample-codes')] }),
+      'utf8',
+    );
+    const devices = new DeviceStore(path.join(dir, 'devices.json'), dictionaries);
+    expect(devices.list()).toEqual([]);
+    dictionaries.create({ id: 'sample-codes', name: '测试字典', entries: {} });
+    expect(devices.list()).toEqual([]);
+
+    const app = Fastify();
+    await registerDictionaryRoutes(app, dictionaries, devices);
+    await app.ready();
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/api/dictionaries/sample-codes',
+    });
+    expect(deleted.statusCode).toBe(409);
+    expect(deleted.json().usedBy).toEqual([
+      { id: 'device-a', name: '设备 A（配置无效）' },
+    ]);
+    expect(dictionaries.has('sample-codes')).toBe(true);
 
     await app.close();
   });

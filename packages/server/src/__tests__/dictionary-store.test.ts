@@ -118,7 +118,48 @@ describe('DictionaryStore', () => {
     );
   });
 
-  it('imports definitions idempotently and rejects content conflicts', () => {
+  it('拒绝仅大小写不同的字典 ID', () => {
+    const dir = tempDir();
+    const store = new DictionaryStore(path.join(dir, 'dictionaries.json'));
+    store.create({ id: 'Sensor-Codes', name: '传感器码表', entries: {} });
+
+    expect(() =>
+      store.create({ id: 'sensor-codes', name: '重复码表', entries: {} }),
+    ).toThrowError(expect.objectContaining({ statusCode: 409 }));
+    expect(() =>
+      store.importDefinitions([
+        { id: 'new-codes', name: '新码表', entries: {} },
+        { id: 'NEW-CODES', name: '重复码表', entries: {} },
+      ]),
+    ).toThrowError(expect.objectContaining({ statusCode: 409 }));
+    expect(store.has('new-codes')).toBe(false);
+  });
+
+  it('加载大小写冲突记录时保留冲突原文，写入时不覆盖', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'dictionaries.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        dictionaries: [
+          { id: 'Alpha', name: '首条', entries: {} },
+          { id: 'alpha', name: '冲突项', entries: {} },
+        ],
+      }),
+      'utf8',
+    );
+    const store = new DictionaryStore(file);
+
+    expect(store.list().map((item) => item.id)).toEqual(['Alpha']);
+    store.update('Alpha', { id: 'Alpha', name: '已更新', entries: {} });
+    const saved = JSON.parse(readFileSync(file, 'utf8')) as {
+      dictionaries: { id: string }[];
+    };
+    expect(saved.dictionaries.map((item) => item.id)).toEqual(['Alpha', 'alpha']);
+  });
+
+  it('按条目内容幂等导入，保留现有名称说明并拒绝条目冲突', () => {
     const dir = tempDir();
     const store = new DictionaryStore(path.join(dir, 'dictionaries.json'));
     const definition = {
@@ -127,11 +168,33 @@ describe('DictionaryStore', () => {
       entries: { '000': { name: '值' } },
     };
     expect(store.importDefinitions([definition])).toHaveLength(1);
-    expect(store.importDefinitions([definition])).toHaveLength(0);
+    expect(store.importDefinitions([{
+      ...definition,
+      name: '迁移来源名称',
+      description: '迁移来源说明',
+    }])).toHaveLength(0);
+    expect(store.get('imported')?.name).toBe('导入');
+    expect(store.get('imported')?.description).toBeUndefined();
     expect(() =>
       store.importDefinitions([
         { id: 'imported', name: '冲突', entries: { '000': { name: '另一个值' } } },
       ]),
     ).toThrow(DictionaryStoreError);
+  });
+
+  it('持久化失败时不保留内存中的新增字典', () => {
+    const dir = tempDir();
+    const blockedParent = path.join(dir, 'blocked-parent');
+    writeFileSync(blockedParent, 'file blocks directory creation', 'utf8');
+    const store = new DictionaryStore(path.join(blockedParent, 'dictionaries.json'));
+
+    expect(() => store.create({ id: 'codes', name: '码表', entries: {} })).toThrow();
+    expect(store.has('codes')).toBe(false);
+    expect(() =>
+      store.importDefinitions([
+        { id: 'imported', name: '迁移字典', entries: {} },
+      ]),
+    ).toThrow();
+    expect(store.has('imported')).toBe(false);
   });
 });
