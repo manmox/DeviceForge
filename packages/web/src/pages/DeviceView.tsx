@@ -6,15 +6,19 @@ import {
   Copy,
   FileCode2,
   Loader2,
+  History,
   Play,
   Plug,
   Radio,
   RotateCcw,
   Square,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { ConfigPanel } from '../components/ConfigPanel';
 import { ConnectionsPanel } from '../components/ConnectionsPanel';
+import { FaultInjectionPanel } from '../components/FaultInjectionPanel';
+import { RecordingPanel } from '../components/RecordingPanel';
 import { deviceInfoHeaderValues } from '../lib/device-info';
 import {
   transportEndpoint,
@@ -26,10 +30,12 @@ import { TrafficPanel } from '../components/TrafficPanel';
 import { useAppStore } from '../store';
 import type { DeviceDetail } from '../types';
 
-type TabId = 'traffic' | 'config' | 'connections' | 'state';
+type TabId = 'traffic' | 'faults' | 'recordings' | 'config' | 'connections' | 'state';
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'traffic', label: '流量', icon: Radio },
+  { id: 'faults', label: '故障注入', icon: Zap },
+  { id: 'recordings', label: '录制回放', icon: History },
   { id: 'config', label: '配置', icon: FileCode2 },
   { id: 'connections', label: '连接', icon: Plug },
   { id: 'state', label: '状态', icon: Braces },
@@ -37,7 +43,7 @@ const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
 
 function initialTab(): TabId {
   const value = new URLSearchParams(window.location.search).get('tab');
-  return value === 'config' || value === 'connections' || value === 'state'
+  return value === 'config' || value === 'connections' || value === 'state' || value === 'faults' || value === 'recordings'
     ? value
     : 'traffic';
 }
@@ -271,6 +277,8 @@ export function DeviceView({ device }: { device: DeviceDetail }) {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {tab === 'traffic' && <TrafficPanel />}
+        {tab === 'faults' && <FaultInjectionPanel />}
+        {tab === 'recordings' && <RecordingPanel />}
         {tab === 'config' && <ConfigPanel device={device} />}
         {tab === 'connections' && <ConnectionsPanel />}
         {tab === 'state' && <StatePanel device={device} />}

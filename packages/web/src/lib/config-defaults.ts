@@ -165,6 +165,7 @@ export function createBlankConfig(): DeviceConfig {
     codec: { type: 'raw', display: 'hex' },
     state: {},
     rules: [],
+    faultInjection: { segmentSizeBytes: 256, rules: [] },
     autoStart: false,
   };
 }

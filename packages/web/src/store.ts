@@ -33,6 +33,7 @@ interface AppState {
   traffic: TrafficEvent[];
   connections: ConnectionInfo[];
   wsConnected: boolean;
+  recordingsRevision: number;
   initializing: boolean;
   toast: Toast | null;
 
@@ -112,6 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   traffic: [],
   connections: [],
   wsConnected: false,
+  recordingsRevision: 0,
   initializing: true,
   toast: null,
 
@@ -491,6 +493,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       case 'dictionariesChanged': {
         void get().loadDictionaries();
+        break;
+      }
+
+      case 'recordingsChanged': {
+        const payload = message.payload as { deviceId?: string };
+        if (payload?.deviceId === get().selectedId) {
+          set((state) => ({ recordingsRevision: state.recordingsRevision + 1 }));
+        }
         break;
       }
 

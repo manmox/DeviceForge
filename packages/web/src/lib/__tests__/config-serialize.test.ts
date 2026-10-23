@@ -32,6 +32,7 @@ const config: DeviceConfig = {
     checksum: { algo: 'crc16-modbus', verify: true },
   },
   state: { temp: 25.5, online: true, note: null },
+  faultInjection: { segmentSizeBytes: 256, rules: [] },
   rules: [
     {
       name: '读取温度',

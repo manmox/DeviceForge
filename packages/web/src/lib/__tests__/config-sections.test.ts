@@ -29,6 +29,7 @@ const config: DeviceConfig = {
   },
   state: { temp: 25.5, humidity: 60 },
   rules: [],
+  faultInjection: { segmentSizeBytes: 256, rules: [] },
   autoStart: false,
 };
 

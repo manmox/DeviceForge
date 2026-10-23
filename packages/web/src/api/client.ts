@@ -6,7 +6,10 @@ import type {
   DeviceSummary,
   DictionaryInput,
   DictionarySummary,
+  FaultInjectionConfig,
   Preset,
+  RecordedTrafficEvent,
+  RecordingSession,
   TrafficEvent,
   ValidationIssue,
 } from '../types';
@@ -110,6 +113,51 @@ export const api = {
     request<{ status: DeviceStatus }>(`/api/devices/${encodeURIComponent(id)}/restart`, {
       method: 'POST',
     }),
+
+  getFaultInjection: (id: string) =>
+    request<{ faultInjection: FaultInjectionConfig; enabled: boolean }>(
+      `/api/devices/${encodeURIComponent(id)}/fault-injection`,
+    ),
+
+  updateFaultInjectionRules: (id: string, faultInjection: FaultInjectionConfig) =>
+    request<{ faultInjection: FaultInjectionConfig; enabled: boolean }>(
+      `/api/devices/${encodeURIComponent(id)}/fault-injection/rules`,
+      { method: 'PUT', body: JSON.stringify(faultInjection) },
+    ),
+
+  setFaultInjectionEnabled: (id: string, enabled: boolean) =>
+    request<{ enabled: boolean }>(
+      `/api/devices/${encodeURIComponent(id)}/fault-injection`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+    ),
+
+  listRecordings: (id: string) =>
+    request<{ recordings: RecordingSession[] }>(
+      `/api/devices/${encodeURIComponent(id)}/recordings`,
+    ).then((result) => result.recordings),
+
+  startRecording: (id: string) =>
+    request<{ recording: RecordingSession }>(
+      `/api/devices/${encodeURIComponent(id)}/recordings`,
+      { method: 'POST' },
+    ).then((result) => result.recording),
+
+  stopRecording: (id: string, recordingId: string) =>
+    request<{ recording: RecordingSession }>(
+      `/api/devices/${encodeURIComponent(id)}/recordings/${encodeURIComponent(recordingId)}/stop`,
+      { method: 'POST' },
+    ).then((result) => result.recording),
+
+  getRecordingEvents: (id: string, recordingId: string, offset = 0, limit = 200) =>
+    request<{ events: RecordedTrafficEvent[]; total: number }>(
+      `/api/devices/${encodeURIComponent(id)}/recordings/${encodeURIComponent(recordingId)}/events?offset=${offset}&limit=${limit}`,
+    ),
+
+  deleteRecording: (id: string, recordingId: string) =>
+    request<void>(
+      `/api/devices/${encodeURIComponent(id)}/recordings/${encodeURIComponent(recordingId)}`,
+      { method: 'DELETE' },
+    ),
 
   send: (id: string, payload: SendPayload) =>
     request<{ ok: true }>(`/api/devices/${encodeURIComponent(id)}/send`, {
