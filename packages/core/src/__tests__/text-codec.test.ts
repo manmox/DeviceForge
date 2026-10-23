@@ -9,7 +9,7 @@ import {
   type TextCodecConfig,
 } from '../index';
 
-const DEVICE_CODE = '000000000000000';
+const SAMPLE_DEVICE_ID = '000000000000000';
 const NOW = Date.UTC(2026, 9, 22, 10, 11, 12);
 
 const sampleDictionaryEntries: DictionaryEntries = {
@@ -49,7 +49,7 @@ function makeContext(overrides: Partial<EncodeContext> = {}): EncodeContext {
     state: {},
     counters: {},
     now: NOW,
-    device: { tnsImei: DEVICE_CODE },
+    device: { serialNumber: SAMPLE_DEVICE_ID },
     ...overrides,
   };
 }
@@ -81,15 +81,15 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
     {
       name: 'report',
       label: '数据上报',
-      prefix: 'NO',
-      suffix: 'END',
+      prefix: 'RPT',
+      suffix: 'DONE',
       display: { summary: ['dataCount', 'sequence'] },
       slots: [
         {
           kind: 'field',
           name: 'deviceCode',
           type: 'string',
-          defaultFrom: 'tnsImei',
+          defaultFrom: 'serialNumber',
           pattern: '^\\d{15}$',
           patternSeverity: 'warning',
         },
@@ -102,7 +102,7 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
           valueSeparator: '|',
           keyField: 'id',
           mapField: 'data',
-          mapKeyPrefix: 'c',
+          mapKeyPrefix: 'item',
           dictionary: 'sampleCodes',
           fields: [
             { kind: 'field', name: 'id', type: 'string', width: 3 },
@@ -140,7 +140,7 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
           kind: 'field',
           name: 'deviceCode',
           type: 'string',
-          defaultFrom: 'tnsImei',
+          defaultFrom: 'serialNumber',
         },
         {
           kind: 'field',
@@ -170,7 +170,7 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
         { index: 4, equals: 'A' },
       ],
       slots: [
-        { kind: 'field', name: 'deviceCode', type: 'string', defaultFrom: 'tnsImei' },
+        { kind: 'field', name: 'deviceCode', type: 'string', defaultFrom: 'serialNumber' },
         { kind: 'literal', value: 'C' },
         { kind: 'field', name: 'commandId', type: 'string', width: 3 },
         { kind: 'literal', value: 'A' },
@@ -180,14 +180,14 @@ const sampleTextConfig: TextCodecConfig = TextCodecSchema.parse({
     {
       name: 'echo',
       label: '设备回显',
-      prefix: 'NO',
-      suffix: 'END',
+      prefix: 'RPT',
+      suffix: 'DONE',
       match: [
         { index: 2, equals: 'C' },
         { index: 4, equals: 'A' },
       ],
       slots: [
-        { kind: 'field', name: 'deviceCode', type: 'string', defaultFrom: 'tnsImei' },
+        { kind: 'field', name: 'deviceCode', type: 'string', defaultFrom: 'serialNumber' },
         { kind: 'literal', value: 'C' },
         { kind: 'field', name: 'commandId', type: 'string', width: 3 },
         { kind: 'literal', value: 'A' },
@@ -282,8 +282,8 @@ describe('text codec optional fields', () => {
     messages: [
       {
         name: 'tail',
-        prefix: 'NO',
-        suffix: 'END',
+        prefix: 'RPT',
+        suffix: 'DONE',
         slots: [
           { kind: 'field', name: 'device', type: 'string' },
           { kind: 'field', name: 'timestamp', type: 'string' },
@@ -386,7 +386,7 @@ describe('text codec repeat and dictionaries', () => {
     expect(decoded.fields.groups).toHaveLength(2);
     expect(decoded.fields.data).toMatchObject({
       item101: { id: '101', value: '12.7', values: ['12.7'], name: '示例数值', unit: 'V' },
-      item102: { id: '102', value: '25', values: ['25', '0'] },
+      item001: { id: '001', value: '25', values: ['25', '0'] },
     });
   });
 
@@ -463,7 +463,7 @@ describe('text codec repeat and dictionaries', () => {
   it('warns and preserves raw values when the global dictionary is missing', () => {
     const codec = makeCodec(sampleTextConfig, null);
     const data = Buffer.from(
-      `RPT:${DEVICE_CODE}:01:101*12.7:2026-10-22 10-11-12:1:DONE\r\n`,
+      `RPT:${SAMPLE_DEVICE_ID}:01:101*12.7:2026-10-22 10-11-12:1:DONE\r\n`,
     );
     const decoded = codec.decode(data);
     expect(decoded.valid).toBe(true);
@@ -504,7 +504,7 @@ describe('text codec repeat and dictionaries', () => {
         .item101?.name,
     ).toBe('旧名称');
 
-    entries = { '000': { name: '新名称', unit: 'V' } };
+    entries = { '101': { name: '新名称', unit: 'V' } };
     expect(
       (codec.decode(frame).fields.data as Record<string, Record<string, unknown>>)
         .item101?.name,
@@ -519,7 +519,7 @@ describe('text codec auto fields and session', () => {
       { fields: { kind: 'report', groups: [] } },
       makeContext(),
     );
-    expect(prepared.message.fields?.deviceCode).toBe(DEVICE_CODE);
+    expect(prepared.message.fields?.deviceCode).toBe(SAMPLE_DEVICE_ID);
     expect(prepared.message.fields?.sequence).toBe('1');
     expect(prepared.message.fields?.timestamp).toMatch(
       /^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$/,
@@ -554,7 +554,7 @@ describe('text codec auto fields and session', () => {
   it('recognizes ACK fields for the protocol session', () => {
     const codec = makeCodec(sampleTextConfig);
     const ack = codec.decode(
-      Buffer.from(`<RPT:${DEVICE_CODE}:20261022:101112:1:OK:DONE>\r\n`),
+      Buffer.from(`<RPT:${SAMPLE_DEVICE_ID}:20261022:101112:1:OK:DONE>\r\n`),
     );
     expect(ack.fields._message).toBe('ack');
     expect(codec.observeInbound?.(ack.fields)).toEqual({
@@ -563,7 +563,7 @@ describe('text codec auto fields and session', () => {
     });
 
     const failed = codec.decode(
-      Buffer.from(`<RPT:${DEVICE_CODE}:20261022:101112:1:FAIL:DONE>\r\n`),
+      Buffer.from(`<RPT:${SAMPLE_DEVICE_ID}:20261022:101112:1:FAIL:DONE>\r\n`),
     );
     expect(codec.observeInbound?.(failed.fields)).toEqual({
       ackKey: '1',
@@ -576,7 +576,7 @@ describe('text codec validation and errors', () => {
   it('reports pattern warnings without invalidating the frame', () => {
     const codec = makeCodec(sampleTextConfig);
     const decoded = codec.decode(
-      Buffer.from('RPT:123:01:000*1:2026-10-22 10-11-12:1:DONE\r\n'),
+      Buffer.from('RPT:123:01:101*1:2026-10-22 10-11-12:1:DONE\r\n'),
     );
     expect(decoded.valid).toBe(true);
     expect(decoded.warnings?.join(' ')).toContain('不符合格式');

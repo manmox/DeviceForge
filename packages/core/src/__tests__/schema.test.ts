@@ -274,10 +274,10 @@ describe('DeviceConfigSchema text codec', () => {
     expect(parsed.codec.type).toBe('text');
   });
 
-  it('rejects the removed example-terminal codec without migration', () => {
+  it('rejects unsupported legacy codecs without migration', () => {
     const result = DeviceConfigSchema.safeParse({
       ...baseConfig(),
-      codec: { type: 'example-terminal' },
+      codec: { type: 'legacy-device' },
     });
     expect(result.success).toBe(false);
   });

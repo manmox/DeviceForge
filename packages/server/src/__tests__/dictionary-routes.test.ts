@@ -64,8 +64,8 @@ describe('字典 API', () => {
 
     const definition = {
       id: 'sample-codes',
-      name: '本机设备示例字典',
-      entries: { '000': { name: '电压', unit: 'V' } },
+      name: '本机测试字典',
+      entries: { '101': { name: '示例值', unit: 'V' } },
     };
     const created = await app.inject({
       method: 'POST',
@@ -78,10 +78,10 @@ describe('字典 API', () => {
     const updated = await app.inject({
       method: 'PUT',
       url: '/api/dictionaries/sample-codes',
-      payload: { ...definition, name: '更新后的设备示例字典' },
+      payload: { ...definition, name: '更新后的测试字典' },
     });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json().dictionary.name).toBe('更新后的设备示例字典');
+    expect(updated.json().dictionary.name).toBe('更新后的测试字典');
 
     const mismatch = await app.inject({
       method: 'PUT',

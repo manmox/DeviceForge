@@ -9,9 +9,9 @@ import type {
 } from '../schema/dictionary';
 
 const entries: DictionaryEntries = {
-  '000': { name: '电压', unit: 'V' },
-  '220': {
-    name: '波形',
+  '101': { name: '示例值', unit: 'V' },
+  '202': {
+    name: '示例数组',
     valueFormat: {
       type: 'int16Array',
       points: 4,
@@ -96,7 +96,7 @@ describe('inline dictionary migration', () => {
       legacyConfig(),
       [
         {
-          id: 'sample-codes',
+          id: 'existingCodes',
           name: '本机字典',
           entries,
         },
@@ -111,7 +111,7 @@ describe('inline dictionary migration', () => {
               { kind: 'field', name: 'count' },
               {
                 kind: 'repeat',
-                dictionary: 'sample-codes',
+                dictionary: 'existingCodes',
               },
             ],
           },
@@ -122,8 +122,8 @@ describe('inline dictionary migration', () => {
 
   it('normalizes valueFormat defaults before matching existing entries', () => {
     const inline = {
-      '220': {
-        name: '波形',
+      '202': {
+        name: '示例数组',
         valueFormat: { type: 'int16Array', points: 4 },
       },
     };
@@ -132,8 +132,8 @@ describe('inline dictionary migration', () => {
         id: 'builtin-codes',
         name: '内置',
         entries: {
-          '220': {
-            name: '波形',
+          '202': {
+            name: '示例数组',
             valueFormat: {
               type: 'int16Array',
               points: 4,
@@ -214,7 +214,7 @@ describe('inline dictionary migration', () => {
   });
 
   it('returns errors and keeps raw data when entries are invalid', () => {
-    const raw = legacyConfig({ entries: { '000': 'not-an-entry' } });
+    const raw = legacyConfig({ entries: { '101': 'not-an-entry' } });
     const result = migrateInlineTextDictionaries(raw, []);
     expect(result.changed).toBe(false);
     expect(result.errors).toHaveLength(1);

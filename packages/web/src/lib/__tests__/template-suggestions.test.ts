@@ -37,7 +37,7 @@ const textCodec: CodecConfig = TextCodecSchema.parse({
           itemSeparator: '*',
           keyField: 'id',
           mapField: 'data',
-          mapKeyPrefix: 'c',
+          mapKeyPrefix: 'item',
           dictionary: 'codes',
           fields: [
             { kind: 'field', name: 'id', type: 'string' },
@@ -64,9 +64,9 @@ const dictionaries: DictionaryRegistry = new Map([
       id: 'codes',
       name: 'codes',
       entries: {
-        '000': { name: '示例数值', unit: 'V' },
-        '089': { name: '示例状态', unit: 'mm', multi: true },
-        '220': {
+        '101': { name: '示例值', unit: 'V' },
+        '105': { name: '示例状态', unit: 'mm', multi: true },
+        '202': {
           name: '示例数组',
           unit: 'Hz',
           valueFormat: {
@@ -93,7 +93,7 @@ const context: TemplateCompletionContext = {
   },
   deviceInfo: {
     model: 'TH-100',
-    tnsImei: '000000000000000',
+    serialNumber: '000000000000000',
   },
 };
 
@@ -349,7 +349,7 @@ describe('template suggestion catalog', () => {
   it('lists configured device fields under $device', () => {
     expect(labels('$device.')).toEqual([
       '$device.model',
-      '$device.tnsImei',
+      '$device.serialNumber',
     ]);
     expect(labels('$device.', { ...context, deviceInfo: {} })).toEqual([]);
   });

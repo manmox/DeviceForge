@@ -21,7 +21,7 @@
 - MQTT Broker（在本机启动 Broker，接受多个客户端连接）
 - 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
-- 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段 波形）
+- 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段编码）
 - 字段：`u8/i8/u16/i16/u24/i24/u32/i32/f32/f64`、`bytes`、`string`、`bcd`
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
@@ -323,14 +323,12 @@ codec:
 - **slot**：`literal`（固定 token）、`field`（普通字段）、`repeat`（计数重复组）。slot 的顺序就是 token 顺序。
 - **field type**：`string`、`int`、`decimal`（保留数值文本）、`timestamp`、`stringList`（默认 `|` 分隔）、`int16Array`（仅由字典 valueFormat 驱动）。
 - **optional**：每条 message 最多一个 optional 字段；解码时会把它前面的字段从左解析、后面的字段从右解析，中间剩余 0/1 个 token 决定是否存在。报表尾部和 ACK 中间的可选流水号都能表达。
-- **repeat**：必须有 `countField`（引用前面的 int 字段）；编码时由数组长度自动计算并覆盖。item 是单个顶层 token，item 内用 `itemSeparator` 分隔，值列表用 `valueSeparator`。`mapField` 会额外生成路径安全索引，例如 `data.item101`，便于模板引用。
+- **repeat**：必须有 `countField`（引用前面的 int 字段）；编码时由数组长度自动计算并覆盖。item 是单个顶层 token，item 内用 `itemSeparator` 分隔，值列表用 `valueSeparator`。`mapField` 会额外生成路径安全索引，例如 `data.item000`，便于模板引用。
 - **auto**：`timestamp` 按 `format`（YYYY/MM/DD/HH/mm/ss）和 codec 时区生成；`sequence` 自动递增。显式传 `null` 可省略 optional 自动字段（如注册包）。
 - **default / defaultFrom**：编码缺省值；`defaultFrom: tnsImei` 等可把设备信息绑定到设备码。
 - **pattern**：解码校验，`error` 判为无效，`warning` 只提示。
 - **dictionaries**：全局数据字典，`repeat.dictionary` 保存字典 ID，`keyField` 决定用哪个 item 字段查表。字典内容不再写进设备配置；未知码只记 warning。
 - **session**：配置 ACK 报文、需要跟踪的报文、流水号/状态字段和成功值；不配置就完全没有 ACK/重传行为。
-
-
 
 **ACK 与重传**：
 
@@ -340,17 +338,17 @@ codec:
 - TCP Client 和 MQTT Client 断线时暂停计时器；重连后先执行 `on: connect` 注册/握手，再按顺序恢复未确认报文。TCP Server 或内嵌 MQTT Broker 的客户端断开时丢弃该连接的 pending。
 - 多连接时每个连接独立确认，互不影响。
 
-**数组字段 波形**：
+**数组字段编码**：
 
 - 在全局字典条目上声明 `valueFormat`。可在数据字典管理器的可视化视图编辑，也可切换到 JSON 源码视图：
   ```json
   {
-    "220": {
+    "002": {
       "name": "示例数组",
-      "unit": "Hz",
+      "unit": "sample",
       "valueFormat": {
         "type": "int16Array",
-        "points": 1024,
+        "points": 8,
         "endian": "be",
         "encoding": "hex",
         "crc": { "algo": "crc16-modbus", "endian": "le" }
@@ -359,8 +357,8 @@ codec:
   }
   ```
   repeat 中只写 `dictionary: codes`。
-- 编码输入：repeat item 使用 `waveform: [1024 个 int16]`；解码后 item 的 `values` 为空数组，`waveform` 包含 `points`、`crc`、`crcValid`、`encoding`；`mapField` 中只保留摘要，避免重复传输 1024 个点。
-- CRC 校验失败时整帧仍然有效，但波形点被丢弃（`points: null`）并记 warning。
+- 编码输入：repeat item 使用 `waveform: [8 个 int16]`；解码后 item 的 `values` 为空数组，`waveform` 包含 `points`、`crc`、`crcValid`、`encoding`；`mapField` 中只保留摘要，避免重复传输数组内容。
+- CRC 校验失败时整帧仍然有效，但数组内容被丢弃（`points: null`）并记 warning。
 - `encoding` 支持 `hex` / `base64`，都是文本安全形态。原始二进制波形段会与分隔符 tokenization 冲突，当前不包含；需要时使用 `length-prefix` / `fixed` 分帧配合后续的 binaryBlob 扩展。
 
 ### 全局数据字典
@@ -368,7 +366,6 @@ codec:
 数据字典是跨设备的全局资源。设备配置只保存 `repeat.dictionary` 的 ID，不保存 entries；多个设备引用同一个 ID 时共享同一份码表。
 
 - **自定义字典**：所有字典都保存在本机 `data/dictionaries.json`，该目录由 Git 忽略，不会随仓库提交或构建分发。可在控制台左侧数据字典管理器中用可视化表格编辑，或切换到 JSON 源码视图；保存后对运行中的设备立即生效，无需重启。
-
 - **引用规则**：`repeat.dictionary` 必须是合法的全局 ID；服务端在保存设备、加载 `devices.json` 和校验预设时检查引用，缺失引用返回 422 或跳过该设备。
 - **删除保护**：仍被设备引用的字典不能删除；更新字典内容不会被阻止，下一帧编解码即使用新内容。ID 创建后不可修改，名称可以修改。
 - **自动迁移**：启动时会把旧 `codec.dictionaries` 转成全局字典并改写 repeat 引用，原 `devices.json` 备份为 `devices.json.pre-dictionary-migration-<timestamp>.bak`；设备 POST/PUT 也接受旧内联字典并自动迁移。`/api/config/validate` 不落盘迁移，旧内联配置会返回明确的 422 提示。
@@ -432,7 +429,7 @@ match:
 | `$counter.tx` / `$counter.rx` | 已发送/已接收帧计数（读取当前值，发送后递增） |
 | `$conn.remoteAddress` | 当前连接信息 |
 | `$device.tnsImei` | 设备信息中的 TNS/IMEI、型号、序列号等 |
-\| `$req.data.item001.value` | 重复组中第一个数据项的值 |
+| `$req.data.item001.value` | repeat 字段映射出的某个条目值 |
 | `$now` | 当前时间戳（毫秒） |
 | `${random(20,30)}` | 闭区间随机整数 |
 | `${randomFloat(20,30)}` | 保留两位小数的随机浮点数 |
@@ -495,7 +492,7 @@ pnpm start           # 生产模式（需要先 build）
 - 通用 `text` codec：prefix/suffix/match、optional 字段、自动时间戳/流水号、repeat/字典/mapField、pattern 警告和异常帧
 - 全局数据字典：schema/ID 校验、引用收集、内联字典迁移、已有字典匹配、ID 冲突、无效数据保留、运行时实时 provider
 - 服务端字典仓库与设备存储：本机字典加载与 CRUD、损坏备份、启动迁移、备份文件、幂等和跨设备前向引用
-- 文本 codec 集成：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
+- 文本 codec：字段、重复组、时间戳、流水号、字典查表、ACK 和重传
 - ACK 会话：超时重发、最大重试、非 OK/未知 ACK、TCP/MQTT Client 暂停与重连恢复、TCP Server/MQTT Broker 断连丢弃、stop 清理
 - 数组字段：int16 BE、CRC16/Modbus 已知向量、hex/base64 round-trip、CRC 失败丢弃、CRC 字节序
 - 模板求值（路径、算术、比较、布尔函数、插值扫描、错误和限制）、模板补全 token/候选/插入，以及字段匹配

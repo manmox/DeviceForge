@@ -154,7 +154,7 @@ export function DictionaryVisualEditor({
         </table>
       </div>
       <div className="border-t border-white/10 px-3 py-2 text-[10px] leading-4 text-mist-500">
-        码值用于 repeat 字段查表；波形设置只影响配置了 数组字段 的条目。
+        码值用于 repeat 字段查表；数组设置只影响配置了数组编码的条目。
       </div>
     </div>
   );
@@ -240,7 +240,7 @@ function DictionaryEntryRows({
             disabled={disabled}
           >
             <Settings2 className="h-3 w-3" />
-            {format ? '数组字段' : '配置格式'}
+            {format ? '数组编码' : '配置格式'}
           </button>
         </td>
         <td className="sticky right-0 z-10 border-l border-white/10 bg-ink-900 px-1 py-1.5 text-right group-hover:bg-ink-850">
@@ -272,14 +272,14 @@ function DictionaryEntryRows({
                   onClick={() => onSetValueFormat(true)}
                   disabled={disabled}
                 >
-                  配置 数组字段
+                  配置数组编码
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs font-medium text-mist-200">数组字段 波形参数</div>
+                    <div className="text-xs font-medium text-mist-200">数组编码参数</div>
                     <div className="mt-0.5 font-mono text-[10px] text-mist-500">
                       {format.type} · CRC16-Modbus {format.crc ? '开启' : '关闭'}
                     </div>

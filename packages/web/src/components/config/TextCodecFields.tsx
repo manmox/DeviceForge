@@ -605,7 +605,7 @@ function RepeatEditor({
           </datalist>
         </FormField>
 
-        <FormField label="索引字段 mapField" hint="生成 decoded[mapField].item101 这类路径。" error={mapFieldError}>
+        <FormField label="索引字段 mapField" hint="生成 decoded[mapField].item000 这类路径。" error={mapFieldError}>
           <TextInput
             value={repeat.mapField ?? ''}
             onChange={(mapField) =>

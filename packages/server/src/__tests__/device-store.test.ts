@@ -76,7 +76,7 @@ describe('DeviceStore dictionary migration', () => {
     const devicesFile = path.join(dir, 'devices.json');
     const dictionariesFile = path.join(dir, 'dictionaries.json');
     const inline: DictionaryEntries = {
-      '000': { name: '电压', unit: 'V' },
+      '101': { name: '示例值', unit: 'V' },
     };
 
     // B 先出现但引用 A 内联迁移出的字典，验证两遍扫描的前向引用。
@@ -147,7 +147,7 @@ describe('DeviceStore dictionary migration', () => {
         version: 1,
         devices: [
           textDevice('good', {
-            inline: { '000': { name: '电压' } },
+            inline: { '101': { name: '示例值' } },
           }),
           { id: 'bad', name: 'bad' },
         ],
