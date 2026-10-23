@@ -4,6 +4,7 @@ import {
   type DeviceConfig,
   type DeviceStatus,
   type DictionaryProvider,
+  type FaultInjectionConfig,
   type TrafficEvent,
 } from '@deviceforge/core';
 import type { DeviceStore } from './store/device-store';
@@ -67,6 +68,14 @@ export class RuntimeManager {
     return { config, status: runtime.getStatus() };
   }
 
+  hasStoredId(id: string): boolean {
+    return this.store.hasStoredId(id);
+  }
+
+  hasInvalidRecord(id: string): boolean {
+    return this.store.hasInvalidRecord(id);
+  }
+
   create(config: DeviceConfig): DeviceSummary {
     this.store.create(config);
     const runtime = this.ensureRuntime(config);
@@ -82,6 +91,26 @@ export class RuntimeManager {
     runtime.updateConfig(config);
     this.emitDevicesChanged();
     return { config, status: runtime.getStatus() };
+  }
+
+  updateFaultInjection(
+    id: string,
+    faultInjection: FaultInjectionConfig,
+  ): DeviceSummary {
+    const current = this.store.get(id);
+    if (!current) throw new Error(`设备 ${id} 不存在`);
+    const config = this.store.update(id, { ...current, faultInjection });
+    const runtime = this.ensureRuntime(config);
+    runtime.updateFaultInjection(config.faultInjection);
+    this.emitDevicesChanged();
+    return { config, status: runtime.getStatus() };
+  }
+
+  async setFaultInjectionEnabled(id: string, enabled: boolean): Promise<DeviceStatus> {
+    const runtime = this.requireRuntime(id);
+    if (!runtime.isActive) throw new Error('设备运行中才能切换故障注入');
+    await runtime.setFaultInjectionEnabled(enabled);
+    return runtime.getStatus();
   }
 
   async remove(id: string): Promise<boolean> {

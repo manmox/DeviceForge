@@ -1,5 +1,6 @@
 import {
   DeviceConfigSchema,
+  FaultInjectionConfigSchema,
   OutgoingMessageSchema,
   findMissingDictionaryReferences,
   migrateInlineTextDictionaries,
@@ -9,6 +10,7 @@ import { z } from 'zod';
 import { issuesOf } from '../lib/device-validation';
 import type { RuntimeManager } from '../runtime-manager';
 import type { DictionaryStore } from '../store/dictionary-store';
+import type { RecordingStore } from '../store/recording-store';
 
 const IdParamsSchema = z.object({
   id: z.string().min(1),
@@ -32,6 +34,17 @@ const TrafficQuerySchema = z.object({
 const StateBodySchema = z.object({
   state: z.record(z.string(), z.unknown()),
 });
+const RecordingParamsSchema = z.object({
+  id: z.string().min(1),
+  recordingId: z.string().uuid(),
+});
+const RecordingEventsQuerySchema = z.object({
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
+});
+
+const FaultInjectionRulesBodySchema = FaultInjectionConfigSchema;
+const FaultInjectionEnabledBodySchema = z.object({ enabled: z.boolean() });
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -41,6 +54,7 @@ export async function registerDeviceRoutes(
   app: FastifyInstance,
   manager: RuntimeManager,
   dictionaries: DictionaryStore,
+  recordings: RecordingStore,
 ): Promise<void> {
   app.get('/api/devices', async () => {
     return { devices: manager.list() };
@@ -79,7 +93,7 @@ export async function registerDeviceRoutes(
       return reply.code(422).send({ error: '配置校验失败', issues: issuesOf(parsed.error) });
     }
     const config = parsed.data;
-    if (manager.get(config.id)) {
+    if (manager.hasStoredId(config.id)) {
       return reply.code(409).send({ error: `设备 ${config.id} 已存在` });
     }
 
@@ -101,8 +115,22 @@ export async function registerDeviceRoutes(
       });
     }
 
-    dictionaries.importDefinitions(migration.definitions);
-    return reply.code(201).send(manager.create(config));
+    dictionaries.validateImportDefinitions(migration.definitions);
+    const created = manager.create(config);
+    try {
+      dictionaries.importDefinitions(migration.definitions);
+    } catch (error) {
+      try {
+        await manager.remove(config.id);
+      } catch (rollbackError) {
+        throw new Error(
+          `字典迁移失败，且设备 ${config.id} 回滚失败：${errorMessage(rollbackError)}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    return reply.code(201).send(created);
   });
 
   app.put('/api/devices/:id', async (request, reply) => {
@@ -133,6 +161,9 @@ export async function registerDeviceRoutes(
 
     const summary = manager.get(id);
     if (!summary) return reply.code(404).send({ error: `设备 ${id} 不存在` });
+    if (manager.hasInvalidRecord(id)) {
+      return reply.code(409).send({ error: `设备 ${id} 还有同 ID 的无效配置记录，请先修复 devices.json` });
+    }
     if (manager.find(id)?.isActive) {
       return reply.code(409).send({ error: '请先停止设备再修改配置' });
     }
@@ -155,8 +186,23 @@ export async function registerDeviceRoutes(
       });
     }
 
-    dictionaries.importDefinitions(migration.definitions);
-    return manager.update(id, config);
+    dictionaries.validateImportDefinitions(migration.definitions);
+    const previous = summary.config;
+    const updated = manager.update(id, config);
+    try {
+      dictionaries.importDefinitions(migration.definitions);
+    } catch (error) {
+      try {
+        manager.update(id, previous);
+      } catch (rollbackError) {
+        throw new Error(
+          `字典迁移失败，且设备 ${id} 回滚失败：${errorMessage(rollbackError)}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    return updated;
   });
 
   app.delete('/api/devices/:id', async (request, reply) => {
@@ -194,6 +240,90 @@ export async function registerDeviceRoutes(
 
     try {
       return { status: await manager.restart(id) };
+    } catch (error) {
+      return reply.code(409).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.get('/api/devices/:id/fault-injection', async (request, reply) => {
+    const { id } = IdParamsSchema.parse(request.params);
+    const summary = manager.get(id);
+    if (!summary) return reply.code(404).send({ error: `设备 ${id} 不存在` });
+    return {
+      faultInjection: summary.config.faultInjection,
+      enabled: summary.status.faultInjectionEnabled,
+    };
+  });
+
+  app.put('/api/devices/:id/fault-injection/rules', async (request, reply) => {
+    const { id } = IdParamsSchema.parse(request.params);
+    const current = manager.get(id);
+    if (!current) return reply.code(404).send({ error: `设备 ${id} 不存在` });
+    const faultInjection = FaultInjectionRulesBodySchema.parse(request.body);
+    const updated = manager.updateFaultInjection(id, faultInjection);
+    return {
+      faultInjection: updated.config.faultInjection,
+      enabled: updated.status.faultInjectionEnabled,
+    };
+  });
+
+  app.patch('/api/devices/:id/fault-injection', async (request, reply) => {
+    const { id } = IdParamsSchema.parse(request.params);
+    if (!manager.get(id)) return reply.code(404).send({ error: `设备 ${id} 不存在` });
+    const { enabled } = FaultInjectionEnabledBodySchema.parse(request.body);
+    try {
+      return { enabled: (await manager.setFaultInjectionEnabled(id, enabled)).faultInjectionEnabled };
+    } catch (error) {
+      return reply.code(409).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.get('/api/devices/:id/recordings', async (request) => {
+    const { id } = IdParamsSchema.parse(request.params);
+    return { recordings: recordings.list(id) };
+  });
+
+  app.post('/api/devices/:id/recordings', async (request, reply) => {
+    const { id } = IdParamsSchema.parse(request.params);
+    if (!manager.get(id)) return reply.code(404).send({ error: `设备 ${id} 不存在` });
+    try {
+      return reply.code(201).send({ recording: recordings.start(id) });
+    } catch (error) {
+      return reply.code(409).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post('/api/devices/:id/recordings/:recordingId/stop', async (request, reply) => {
+    const { id, recordingId } = RecordingParamsSchema.parse(request.params);
+    try {
+      const recording = recordings.stop(id, recordingId);
+      if (!recording) return reply.code(404).send({ error: '录制会话不存在或已结束' });
+      return { recording };
+    } catch (error) {
+      return reply.code(500).send({ error: `停止录制失败：${errorMessage(error)}` });
+    }
+  });
+
+  app.get('/api/devices/:id/recordings/:recordingId/events', async (request, reply) => {
+    const { id, recordingId } = RecordingParamsSchema.parse(request.params);
+    const query = RecordingEventsQuerySchema.parse(request.query);
+    const result = await recordings.readEvents(
+      id,
+      recordingId,
+      query.offset,
+      query.limit,
+    );
+    if (!result) return reply.code(404).send({ error: '录制会话不存在' });
+    return result;
+  });
+
+  app.delete('/api/devices/:id/recordings/:recordingId', async (request, reply) => {
+    const { id, recordingId } = RecordingParamsSchema.parse(request.params);
+    try {
+      if (!recordings.delete(id, recordingId)) {
+        return reply.code(404).send({ error: '录制会话不存在' });
+      }
+      return reply.code(204).send();
     } catch (error) {
       return reply.code(409).send({ error: errorMessage(error) });
     }

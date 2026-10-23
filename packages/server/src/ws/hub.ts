@@ -71,6 +71,10 @@ export class WsHub {
     this.broadcast('dictionariesChanged', { ts: Date.now() });
   }
 
+  recordingsChanged(deviceId: string): void {
+    this.broadcast('recordingsChanged', { deviceId, ts: Date.now() });
+  }
+
   close(): void {
     clearInterval(this.flushTimer);
     clearInterval(this.heartbeatTimer);

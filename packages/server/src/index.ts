@@ -10,6 +10,7 @@ import { registerDictionaryRoutes } from './routes/dictionaries';
 import { RuntimeManager } from './runtime-manager';
 import { DeviceStore } from './store/device-store';
 import { DictionaryStore } from './store/dictionary-store';
+import { RecordingStore } from './store/recording-store';
 import { WsHub } from './ws/hub';
 
 async function main(): Promise<void> {
@@ -19,6 +20,8 @@ async function main(): Promise<void> {
 
   const dictionaries = new DictionaryStore(paths.dictionariesFile);
   const store = new DeviceStore(paths.devicesFile, dictionaries);
+  const recordings = new RecordingStore(paths.recordingsDir);
+  await recordings.initialize();
   const manager = new RuntimeManager(store, dictionaries.provider());
 
   app.setErrorHandler((error, request, reply) => {
@@ -53,7 +56,7 @@ async function main(): Promise<void> {
   }
 
   await registerConfigRoutes(app, dictionaries);
-  await registerDeviceRoutes(app, manager, dictionaries);
+  await registerDeviceRoutes(app, manager, dictionaries, recordings);
   await registerDictionaryRoutes(app, dictionaries, store);
 
   app.setNotFoundHandler((request, reply) => {
@@ -80,6 +83,8 @@ async function main(): Promise<void> {
 
   dictionaries.onChange(() => hub.dictionariesChanged());
   manager.onTraffic((event) => hub.pushTraffic(event));
+  manager.onTraffic((event) => recordings.append(event));
+  recordings.onChange((deviceId) => hub.recordingsChanged(deviceId));
   manager.onStatus((status) => hub.status(status));
   manager.onConnections((deviceId, connections) => hub.connections(deviceId, connections));
   manager.onError((event) => hub.error(event));

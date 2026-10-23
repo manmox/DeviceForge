@@ -9,6 +9,7 @@ export const paths = {
   dataDir,
   devicesFile: path.join(dataDir, 'devices.json'),
   dictionariesFile: path.join(dataDir, 'dictionaries.json'),
+  recordingsDir: path.join(dataDir, 'recordings'),
   presetsDir: path.join(repoRoot, 'presets'),
   webDist: path.join(repoRoot, 'packages/web/dist'),
 };
