@@ -18,6 +18,7 @@ import type {
   RecordingSession,
   TrafficEvent,
 } from '@deviceforge/core';
+import type { RecordingApplication } from '../application/contracts';
 
 interface ActiveRecording {
   session: RecordingSession;
@@ -55,7 +56,7 @@ async function countRecordedEvents(filePath: string): Promise<number> {
   return count;
 }
 
-export class RecordingStore {
+export class RecordingStore implements RecordingApplication {
   private readonly sessions = new Map<string, RecordingSession>();
   private readonly activeByDevice = new Map<string, ActiveRecording>();
   private readonly listeners = new Set<(deviceId: string) => void>();

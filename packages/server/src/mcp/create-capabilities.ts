@@ -7,9 +7,11 @@ import type {
 import type {
   ConnectionInfo,
   DeviceStatus,
+  FaultInjectionConfig,
   OutgoingMessage,
   TrafficEvent,
 } from '@deviceforge/core';
+import type { RecordingApplication } from '../application/contracts';
 
 export interface RuntimeDevicePort {
   getState(): Record<string, unknown>;
@@ -29,15 +31,18 @@ export interface RuntimeManagerPort {
   start(id: string): Promise<DeviceStatus>;
   stop(id: string): Promise<DeviceStatus>;
   restart(id: string): Promise<DeviceStatus>;
+  updateFaultInjection(id: string, config: FaultInjectionConfig): DeviceSummary;
+  setFaultInjectionEnabled(id: string, enabled: boolean): Promise<DeviceStatus>;
 }
 
 export function createMcpCapabilities(options: {
   projectFiles: ProjectFileApplication;
   deviceConfigs: DeviceConfigurationApplication;
   presets: PresetApplication;
+  recordings: RecordingApplication;
   runtimeManager: RuntimeManagerPort;
 }): McpCapabilities {
-  const { projectFiles, deviceConfigs, presets, runtimeManager } = options;
+  const { projectFiles, deviceConfigs, presets, recordings, runtimeManager } = options;
 
   return {
     projectFiles,
@@ -83,6 +88,43 @@ export function createMcpCapabilities(options: {
           return true;
         });
         return events.slice(-query.limit);
+      },
+    },
+    faultInjection: {
+      get: (id) => {
+        const summary = runtimeManager.get(id);
+        if (!summary) return undefined;
+        return {
+          faultInjection: summary.config.faultInjection,
+          enabled: summary.status.faultInjectionEnabled,
+        };
+      },
+      updateRules: (id, config) => {
+        const summary = runtimeManager.updateFaultInjection(id, config);
+        return {
+          faultInjection: summary.config.faultInjection,
+          enabled: summary.status.faultInjectionEnabled,
+        };
+      },
+      setEnabled: (id, enabled) =>
+        runtimeManager.setFaultInjectionEnabled(id, enabled),
+    },
+    recordings: {
+      list: (deviceId) => recordings.list(deviceId),
+      start: (deviceId) => {
+        if (!runtimeManager.get(deviceId)) throw new Error(`设备 ${deviceId} 不存在`);
+        return recordings.start(deviceId);
+      },
+      stop: (deviceId, recordingId) => recordings.stop(deviceId, recordingId),
+      readEvents: (deviceId, recordingId, offset, limit) =>
+        recordings.readEvents(deviceId, recordingId, offset, limit),
+      delete: (deviceId, recordingId) => {
+        const session = recordings.list(deviceId).find((item) => item.id === recordingId);
+        if (!session) return false;
+        if (session.state !== 'stopped') {
+          throw new Error('仅允许删除已停止的录制会话');
+        }
+        return recordings.delete(deviceId, recordingId);
       },
     },
   };

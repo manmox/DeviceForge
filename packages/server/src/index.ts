@@ -102,6 +102,7 @@ async function main(): Promise<void> {
     projectFiles: new ProjectFileApplicationService(paths.repoRoot),
     deviceConfigs,
     presets,
+    recordings,
     runtimeManager: manager,
   });
   let mcpServer: McpHttpServer;

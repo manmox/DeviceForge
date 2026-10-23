@@ -1,6 +1,8 @@
 import type {
   DeviceConfig,
   DeviceStatus,
+  RecordedTrafficEvent,
+  RecordingSession,
   GlobalDictionaryDefinition,
 } from '@deviceforge/core';
 
@@ -30,6 +32,19 @@ export interface DevicePreset {
 
 export interface PresetApplication {
   list(): DevicePreset[];
+}
+
+export interface RecordingApplication {
+  list(deviceId: string): RecordingSession[];
+  start(deviceId: string): RecordingSession;
+  stop(deviceId: string, recordingId: string): RecordingSession | undefined;
+  readEvents(
+    deviceId: string,
+    recordingId: string,
+    offset: number,
+    limit: number,
+  ): Promise<{ events: RecordedTrafficEvent[]; total: number } | undefined>;
+  delete(deviceId: string, recordingId: string): boolean;
 }
 
 export interface DeviceConfigurationApplication {

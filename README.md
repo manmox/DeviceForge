@@ -68,10 +68,12 @@ pnpm start
 - **设备配置**：`devices_list`、`devices_get`、`devices_list_presets`、`devices_validate_config`、`devices_create_from_yaml`、`devices_update_from_yaml`。配置创建和更新共用 REST API 的校验及字典迁移规则；创建设备后不会自动启动，更新运行中的设备会被拒绝。
 - **设备运行**：`runtime_start`、`runtime_stop`、`runtime_restart`、`runtime_send`、`runtime_disconnect`。
 - **流量记录**：`traffic_query`，可按方向和起始时间筛选内存中的收发及系统事件。
+- **故障注入**：`fault_injection_get` 查询规则和启用状态，`fault_injection_update_rules` 校验并热更新规则，`fault_injection_set_enabled` 在设备运行时启停注入。规则沿用设备配置中的故障注入 schema，停止设备或重启服务后默认关闭。
+- **录制回放**：`recordings_list`、`recordings_start`、`recordings_stop`、`recordings_read_events` 和 `recordings_delete`。事件读取使用 `offset`/`limit` 分页，默认 200 条、最多 1000 条，返回相对时间偏移及完整收发事件。读取只查看历史数据，不会向设备重发报文或重新执行故障规则；删除仅允许已停止的会话。
 
-MCP 不提供删除设备或清空流量记录的工具。文件读取单次最多 2 MiB；搜索最多扫描 2000 个文件，并最多返回 500 处匹配。
+MCP 不提供删除设备或清空实时流量的工具。录制会话删除后无法恢复。文件读取单次最多 2 MiB；搜索最多扫描 2000 个文件，并最多返回 500 处匹配。
 
-仓库内本地运行文件可能含有明文凭据，例如 `data/devices.json` 中的 MQTT 密码。MCP 文件读取工具会原样返回文件内容，连接 MCP 的 agent 因而也能读取这些凭据。仅在可信的本机开发环境中启用该服务。
+仓库内本地运行文件可能含有明文凭据，例如 `data/devices.json` 中的 MQTT 密码；`data/recordings/` 还可能保存设备报文和敏感业务数据。MCP 文件读取和录制查询会原样返回这些内容，连接 MCP 的 agent 因而可以读取。仅在可信的本机开发环境中启用该服务。
 
 ## 5 分钟演示
 

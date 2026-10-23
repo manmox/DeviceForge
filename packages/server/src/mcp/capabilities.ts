@@ -1,4 +1,5 @@
 import type {
+  FaultInjectionConfig,
   ConnectionInfo,
   DeviceStatus,
   OutgoingMessage,
@@ -7,6 +8,7 @@ import type {
 import type {
   DeviceConfigurationApplication,
   DevicePreset,
+  RecordingApplication,
   DeviceSummary,
   ProjectFileApplication,
 } from '../application/contracts';
@@ -53,9 +55,24 @@ export interface TrafficCapabilities {
   ): TrafficEvent[] | undefined;
 }
 
+export interface FaultInjectionSnapshot {
+  faultInjection: FaultInjectionConfig;
+  enabled: boolean;
+}
+
+export interface FaultInjectionCapabilities {
+  get(id: string): FaultInjectionSnapshot | undefined;
+  updateRules(id: string, config: FaultInjectionConfig): FaultInjectionSnapshot;
+  setEnabled(id: string, enabled: boolean): Promise<DeviceStatus>;
+}
+
+export type RecordingCapabilities = RecordingApplication;
+
 export interface McpCapabilities {
   projectFiles: ProjectFileCapabilities;
   devices: DeviceCapabilities;
   runtime: RuntimeCapabilities;
   traffic: TrafficCapabilities;
+  faultInjection: FaultInjectionCapabilities;
+  recordings: RecordingCapabilities;
 }

@@ -1,7 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import type { McpCapabilities } from './capabilities';
 import { registerDeviceTools } from './tools/device-tools';
+import { registerFaultInjectionTools } from './tools/fault-injection-tools';
 import { registerProjectTools } from './tools/project-tools';
+import { registerRecordingTools } from './tools/recording-tools';
 import { registerRuntimeTools } from './tools/runtime-tools';
 import { registerTrafficTools } from './tools/traffic-tools';
 
@@ -15,6 +17,8 @@ export function createDeviceForgeMcpServer(capabilities: McpCapabilities): McpSe
   registerDeviceTools(server, capabilities.devices);
   registerRuntimeTools(server, capabilities.runtime);
   registerTrafficTools(server, capabilities.traffic);
+  registerFaultInjectionTools(server, capabilities.faultInjection);
+  registerRecordingTools(server, capabilities.recordings);
 
   return server;
 }
