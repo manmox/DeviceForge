@@ -95,7 +95,7 @@ export class MqttClientTransportAdapter implements TransportAdapter {
         retain: packet.retain,
       };
       connection.rxBytes += payload.length;
-      this.events?.onData(connection.id, payload, metadata);
+      this.events?.onData(connection.id, payload, { mqtt: metadata });
     });
 
     client.on('close', () => {

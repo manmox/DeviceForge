@@ -222,7 +222,9 @@ export function TrafficPanel() {
                   <h3 className="mt-3 text-sm font-medium text-mist-200">还没有报文</h3>
                   <p className="mt-1.5 text-xs leading-5 text-mist-500">
                     {presentation.trafficEmptyHint}
-                    也可以用上方面板手动发送一帧。
+                    {device.config.transport.type === 'http-server'
+                      ? ' HTTP 响应由请求规则生成。'
+                      : ' 也可以用上方面板手动发送一帧。'}
                   </p>
                 </div>
               </div>

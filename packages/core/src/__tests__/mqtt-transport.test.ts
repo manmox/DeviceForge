@@ -37,7 +37,7 @@ function createEvents(): TestEvents {
     errors: [],
     events: {
       onData(connectionId, payload, mqtt) {
-        result.data.push({ connectionId, payload: Buffer.from(payload), mqtt });
+        result.data.push({ connectionId, payload: Buffer.from(payload), mqtt: mqtt?.mqtt });
       },
       onConnect(connection) {
         result.connects.push(connection);

@@ -217,7 +217,7 @@ export class MqttBrokerTransportAdapter implements TransportAdapter {
       retain: packet.retain,
       clientId: client.id,
     };
-    this.events?.onData(connectionId, payload, metadata);
+    this.events?.onData(connectionId, payload, { mqtt: metadata });
   }
 
   private setStatus(patch: Partial<TransportStatus>): void {

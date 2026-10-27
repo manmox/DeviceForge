@@ -3,6 +3,12 @@ import type {
   MqttBrokerTransport,
   MqttClientTransport,
   MqttSubscription,
+  HttpServerTransport,
+  SerialTransport,
+  VirtualSerialTransport,
+  UdpClientTransport,
+  UdpServerTransport,
+  WebSocketServerTransport,
   TcpClientTransport,
   TcpServerTransport,
   TransportConfig,
@@ -23,6 +29,7 @@ import {
   SelectInput,
   SwitchRow,
   TextInput,
+  type SelectOption,
 } from '../form/FormControls';
 import { FormSection } from '../form/FormSection';
 
@@ -471,6 +478,129 @@ function MqttBrokerFields({
   );
 }
 
+function ExtendedTransportFields({
+  transport,
+  onChange,
+  disabled,
+}: {
+  transport: Exclude<TransportConfig, TcpServerTransport | TcpClientTransport | MqttClientTransport | MqttBrokerTransport>;
+  onChange: (next: TransportConfig) => void;
+  disabled: boolean;
+}) {
+  const hostError = useIssueText('transport.host');
+  const portError = useIssueText('transport.port');
+  const pathError = useIssueText('transport.path');
+  const bodySizeError = useIssueText('transport.maxBodyBytes');
+  const messageSizeError = useIssueText('transport.maxMessageBytes');
+  const serialPathError = useIssueText('transport.portPath');
+  const baudRateError = useIssueText('transport.baudRate');
+  const dataBitsError = useIssueText('transport.dataBits');
+  const stopBitsError = useIssueText('transport.stopBits');
+  const parityError = useIssueText('transport.parity');
+  const flowControlError = useIssueText('transport.flowControl');
+  const flowOptions: SelectOption<'none' | 'rtscts' | 'xon-xoff'>[] = [
+    { value: 'none', label: '无' },
+    { value: 'rtscts', label: 'RTS/CTS' },
+    { value: 'xon-xoff', label: 'XON/XOFF' },
+  ];
+  const parityOptions: SelectOption<'none' | 'even' | 'odd'>[] = [
+    { value: 'none', label: '无校验' },
+    { value: 'even', label: '偶校验' },
+    { value: 'odd', label: '奇校验' },
+  ];
+
+  if (transport.type === 'serial' || transport.type === 'virtual-serial') {
+    const updateSerial = (patch: Partial<SerialTransport | VirtualSerialTransport>) =>
+      onChange({ ...transport, ...patch } as SerialTransport | VirtualSerialTransport);
+    return (
+      <>
+        {transport.type === 'serial' ? (
+          <FormField label="串口路径" required error={serialPathError} hint="Linux 常见 /dev/ttyUSB0 或 /dev/ttyACM0；macOS 常见 /dev/cu.usbserial-*。">
+            <TextInput value={transport.portPath} onChange={(portPath) => updateSerial({ portPath })} disabled={disabled} monospace placeholder="/dev/ttyUSB0" />
+          </FormField>
+        ) : (
+          <div className="sm:col-span-2 rounded-lg border border-white/10 bg-ink-900/30 p-2.5 text-[11px] leading-5 text-mist-400">
+            启动时由 socat 创建 PTY 对，设备端与外部工具端路径会显示在端点区域。停止设备会结束 socat 并移除临时 PTY。
+          </div>
+        )}
+        <FormField label="波特率" required error={baudRateError}>
+          <NumberInput value={transport.baudRate} onChange={(baudRate) => updateSerial({ baudRate: baudRate ?? 9600 })} min={50} max={4_000_000} step={300} disabled={disabled} ariaLabel="串口波特率" />
+        </FormField>
+        <FormField label="数据位" error={dataBitsError}>
+          <SelectInput<string> value={String(transport.dataBits)} options={[5, 6, 7, 8].map((value) => ({ value: String(value), label: String(value) }))} onChange={(dataBits) => updateSerial({ dataBits: Number(dataBits) as 5 | 6 | 7 | 8 })} disabled={disabled} ariaLabel="串口数据位" />
+        </FormField>
+        <FormField label="停止位" error={stopBitsError}>
+          <SelectInput<string> value={String(transport.stopBits)} options={[{ value: '1', label: '1' }, { value: '1.5', label: '1.5' }, { value: '2', label: '2' }]} onChange={(stopBits) => updateSerial({ stopBits: Number(stopBits) as 1 | 1.5 | 2 })} disabled={disabled} ariaLabel="串口停止位" />
+        </FormField>
+        <FormField label="校验位" error={parityError}>
+          <SelectInput<'none' | 'even' | 'odd'> value={transport.parity} options={[...parityOptions]} onChange={(parity) => updateSerial({ parity })} disabled={disabled} ariaLabel="串口校验位" />
+        </FormField>
+        <FormField label="流控制" error={flowControlError}>
+          <SelectInput<'none' | 'rtscts' | 'xon-xoff'> value={transport.flowControl} options={[...flowOptions]} onChange={(flowControl) => updateSerial({ flowControl })} disabled={disabled} ariaLabel="串口流控制" />
+        </FormField>
+      </>
+    );
+  }
+
+  if (transport.type === 'udp-server' || transport.type === 'http-server' || transport.type === 'websocket-server') {
+    const updateHostPort = (patch: Partial<UdpServerTransport | HttpServerTransport | WebSocketServerTransport>) =>
+      onChange({ ...transport, ...patch } as TransportConfig);
+    return (
+      <>
+        <FormField label="监听地址" required error={hostError} hint="默认绑定 127.0.0.1。">
+          <TextInput value={transport.host} onChange={(host) => updateHostPort({ host })} disabled={disabled} monospace placeholder="127.0.0.1" />
+        </FormField>
+        <FormField label="监听端口" required error={portError} hint="0 表示由系统分配端口。">
+          <NumberInput value={transport.port} onChange={(port) => updateHostPort({ port: port ?? 0 })} min={0} max={65535} step={1} disabled={disabled} ariaLabel="监听端口" />
+        </FormField>
+        {transport.type === 'http-server' && (
+          <FormField label="请求体上限（字节）" error={bodySizeError} hint="超过上限的请求返回 413。">
+            <NumberInput value={transport.maxBodyBytes} onChange={(maxBodyBytes) => updateHostPort({ maxBodyBytes: maxBodyBytes ?? 1_048_576 })} min={1} max={16 * 1024 * 1024} step={1024} disabled={disabled} ariaLabel="HTTP 请求体上限" />
+          </FormField>
+        )}
+        {transport.type === 'websocket-server' && (
+          <>
+            <FormField label="WebSocket 路径" required error={pathError}>
+              <TextInput value={transport.path} onChange={(path) => updateHostPort({ path })} disabled={disabled} monospace placeholder="/ws" />
+            </FormField>
+            <FormField label="消息上限（字节）" error={messageSizeError}>
+              <NumberInput value={transport.maxMessageBytes} onChange={(maxMessageBytes) => updateHostPort({ maxMessageBytes: maxMessageBytes ?? 1_048_576 })} min={1} max={16 * 1024 * 1024} step={1024} disabled={disabled} ariaLabel="WebSocket 消息上限" />
+            </FormField>
+          </>
+        )}
+        <div className="sm:col-span-2 text-[11px] text-mist-500">端点：<span className="font-mono text-mist-300">{transportEndpoint(transport)}</span></div>
+        {transport.host === '0.0.0.0' && (
+          <div className="sm:col-span-2"><InlineWarning>该模拟服务会开放到局域网，且没有 TLS 或认证。确认网络环境可信后再使用。</InlineWarning></div>
+        )}
+      </>
+    );
+  }
+
+  if (transport.type === 'udp-client') {
+    const update = (patch: Partial<UdpClientTransport>) => onChange({ ...transport, ...patch });
+    return (
+      <>
+        <FormField label="目标地址" required error={hostError}>
+          <TextInput value={transport.host} onChange={(host) => update({ host })} disabled={disabled} monospace placeholder="127.0.0.1" />
+        </FormField>
+        <FormField label="目标端口" required error={portError}>
+          <NumberInput value={transport.port} onChange={(port) => update({ port: port ?? 19011 })} min={1} max={65535} step={1} disabled={disabled} ariaLabel="UDP 目标端口" />
+        </FormField>
+        <FormField label="本地绑定地址（可选）">
+          <TextInput value={transport.localHost ?? ''} onChange={(localHost) => update({ localHost: localHost || undefined })} disabled={disabled} monospace placeholder="系统自动选择" />
+        </FormField>
+        <FormField label="本地端口" hint="0 表示由系统分配。">
+          <NumberInput value={transport.localPort} onChange={(localPort) => update({ localPort: localPort ?? 0 })} min={0} max={65535} step={1} disabled={disabled} ariaLabel="UDP 本地端口" />
+        </FormField>
+        {transport.host.trim() && !isLoopbackHost(transport.host) && (
+          <div className="sm:col-span-2"><InlineWarning>设备会向该地址发送 UDP 数据报；UDP 不提供 TLS 或认证。</InlineWarning></div>
+        )}
+      </>
+    );
+  }
+  return null;
+}
+
 export function TransportSection({
   config,
   onChange,
@@ -492,7 +622,7 @@ export function TransportSection({
   return (
     <FormSection
       title="传输"
-      description="选择 TCP 流连接，或使用 MQTT 发布和订阅主题。"
+      description="选择 TCP、UDP、串口、HTTP、WebSocket 或 MQTT 传输。"
       icon={<Cable className="h-4 w-4 text-sky-400" />}
       path="transport"
     >
@@ -521,8 +651,10 @@ export function TransportSection({
           <TcpClientFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
         ) : config.transport.type === 'mqtt-client' ? (
           <MqttClientFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
-        ) : (
+        ) : config.transport.type === 'mqtt-broker' ? (
           <MqttBrokerFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
+        ) : (
+          <ExtendedTransportFields transport={config.transport} onChange={changeTransport} disabled={disabled} />
         )}
       </div>
     </FormSection>

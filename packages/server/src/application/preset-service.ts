@@ -44,7 +44,11 @@ export class PresetApplicationService implements PresetApplication {
       }
     }
 
-    const priority = ['vendor-sensor', 'line-protocol', 'tcp-echo'];
+    const priority = [
+      'vendor-sensor', 'line-protocol', 'tcp-echo', 'tcp-client',
+      'udp-echo', 'udp-client', 'serial-line', 'virtual-serial-line',
+      'http-health', 'websocket-echo', 'mqtt-broker', 'mqtt-client',
+    ];
     presets.sort((left, right) => {
       const leftIndex = priority.indexOf(left.id);
       const rightIndex = priority.indexOf(right.id);

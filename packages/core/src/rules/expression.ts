@@ -1,5 +1,5 @@
 import type { DeviceInfo } from '../schema/device';
-import type { ConnectionInfo } from '../types';
+import type { ConnectionInfo, HttpRequestMetadata, WebSocketMessageMetadata } from '../types';
 import { TEMPLATE_FUNCTIONS } from './template-functions';
 
 export type { TemplateFunctionInfo } from './template-functions';
@@ -16,12 +16,14 @@ export interface TemplateContext {
     retain: boolean;
     clientId?: string;
   };
+  http?: HttpRequestMetadata;
+  websocket?: WebSocketMessageMetadata;
   device?: DeviceInfo;
   now: number;
 }
 
 const FUNCTION_MAP = new Map(TEMPLATE_FUNCTIONS.map((fn) => [fn.name, fn]));
-const ROOTS = new Set(['req', 'state', 'counter', 'conn', 'device', 'mqtt', 'now']);
+const ROOTS = new Set(['req', 'state', 'counter', 'conn', 'device', 'mqtt', 'http', 'websocket', 'now']);
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const MAX_EXPRESSION_LENGTH = 2048;
@@ -511,6 +513,12 @@ function resolvePath(parts: string[], context: TemplateContext): unknown {
       break;
     case 'mqtt':
       current = context.mqtt;
+      break;
+    case 'http':
+      current = context.http;
+      break;
+    case 'websocket':
+      current = context.websocket;
       break;
   }
 

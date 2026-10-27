@@ -42,7 +42,7 @@ interface TcpStream {
   deliver?: (data: Buffer) => Promise<void>;
 }
 
-interface FaultResult {
+export interface FaultResult {
   data?: Buffer;
   applied?: AppliedFault;
 }
@@ -54,16 +54,16 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
- * 运行时故障注入。TCP 字节流按固定长度分段，MQTT 按 PUBLISH 载荷处理。
+ * 运行时故障注入。TCP/串口按固定长度分段，有边界传输按单条消息处理。
  * 每条连接的入站、出站计数彼此独立。
  */
 export class FaultInjector {
   private config: FaultInjectionConfig;
   private enabled = false;
   private readonly streams = new Map<string, TcpStream>();
-  private readonly mqttIndexes = new Map<string, number>();
-  private readonly mqttChains = new Map<string, Promise<void>>();
-  private readonly mqttGenerations = new Map<string, symbol>();
+  private readonly messageIndexes = new Map<string, number>();
+  private readonly messageChains = new Map<string, Promise<void>>();
+  private readonly messageGenerations = new Map<string, symbol>();
   private generation = 0;
   private readonly random: () => number;
 
@@ -88,12 +88,12 @@ export class FaultInjector {
   }
 
   openConnection(connectionId: string): void {
-    this.mqttGenerations.set(connectionId, Symbol(connectionId));
-    for (const key of this.mqttIndexes.keys()) {
-      if (key.startsWith(`${connectionId}\u0000`)) this.mqttIndexes.delete(key);
+    this.messageGenerations.set(connectionId, Symbol(connectionId));
+    for (const key of this.messageIndexes.keys()) {
+      if (key.startsWith(`${connectionId}\u0000`)) this.messageIndexes.delete(key);
     }
-    for (const key of this.mqttChains.keys()) {
-      if (key.startsWith(`${connectionId}\u0000`)) this.mqttChains.delete(key);
+    for (const key of this.messageChains.keys()) {
+      if (key.startsWith(`${connectionId}\u0000`)) this.messageChains.delete(key);
     }
   }
 
@@ -102,7 +102,7 @@ export class FaultInjector {
     this.enabled = enabled;
     if (enabled) {
       if (!wasEnabled) {
-        this.mqttIndexes.clear();
+        this.messageIndexes.clear();
         for (const stream of this.streams.values()) stream.index = 0;
       }
       return;
@@ -178,17 +178,22 @@ export class FaultInjector {
     await completed;
   }
 
-  async processMqtt(
+  async processMessage(
     connectionId: string,
     direction: FaultDirection,
     data: Buffer,
   ): Promise<FaultResult> {
     const key = `${connectionId}\u0000${direction}`;
-    const generation = this.mqttGenerations.get(connectionId);
+    let generation = this.messageGenerations.get(connectionId);
+    // Broker 广播没有客户端连接 ID，空 ID 表示 Broker 级消息序列。
+    if (!generation && connectionId === '') {
+      generation = Symbol('broadcast');
+      this.messageGenerations.set(connectionId, generation);
+    }
     if (!generation) return {};
     const epoch = this.generation;
     const active = this.enabled && this.config.rules.length > 0;
-    const previous = this.mqttChains.get(key);
+    const previous = this.messageChains.get(key);
     if (!active && !previous) return { data };
 
     let resolveResult!: (result: FaultResult) => void;
@@ -201,7 +206,7 @@ export class FaultInjector {
       .then(async () => {
         if (
           epoch !== this.generation ||
-          generation !== this.mqttGenerations.get(connectionId)
+          generation !== this.messageGenerations.get(connectionId)
         ) {
           resolveResult({});
           return;
@@ -210,12 +215,12 @@ export class FaultInjector {
           resolveResult({ data });
           return;
         }
-        const index = (this.mqttIndexes.get(key) ?? 0) + 1;
-        this.mqttIndexes.set(key, index);
+        const index = (this.messageIndexes.get(key) ?? 0) + 1;
+        this.messageIndexes.set(key, index);
         const result = await this.apply(connectionId, direction, index, data);
         if (
           epoch !== this.generation ||
-          generation !== this.mqttGenerations.get(connectionId)
+          generation !== this.messageGenerations.get(connectionId)
         ) {
           resolveResult({});
           return;
@@ -225,15 +230,24 @@ export class FaultInjector {
       .catch((error: unknown) => {
         rejectResult(error);
       });
-    this.mqttChains.set(key, next);
+    this.messageChains.set(key, next);
     void next.finally(() => {
-      if (this.mqttChains.get(key) === next) this.mqttChains.delete(key);
+      if (this.messageChains.get(key) === next) this.messageChains.delete(key);
     });
     return resultPromise;
   }
 
+  /** 保留旧接口名称，兼容现有调用方与测试。 */
+  processMqtt(
+    connectionId: string,
+    direction: FaultDirection,
+    data: Buffer,
+  ): Promise<FaultResult> {
+    return this.processMessage(connectionId, direction, data);
+  }
+
   closeConnection(connectionId: string): void {
-    this.mqttGenerations.delete(connectionId);
+    this.messageGenerations.delete(connectionId);
     for (const [key, stream] of this.streams) {
       if (stream.connectionId !== connectionId) continue;
       stream.closed = true;
@@ -244,11 +258,11 @@ export class FaultInjector {
       this.resolveWaiters(stream);
       this.streams.delete(key);
     }
-    for (const key of this.mqttIndexes.keys()) {
-      if (key.startsWith(`${connectionId}\u0000`)) this.mqttIndexes.delete(key);
+    for (const key of this.messageIndexes.keys()) {
+      if (key.startsWith(`${connectionId}\u0000`)) this.messageIndexes.delete(key);
     }
-    for (const key of this.mqttChains.keys()) {
-      if (key.startsWith(`${connectionId}\u0000`)) this.mqttChains.delete(key);
+    for (const key of this.messageChains.keys()) {
+      if (key.startsWith(`${connectionId}\u0000`)) this.messageChains.delete(key);
     }
   }
 
@@ -263,9 +277,9 @@ export class FaultInjector {
       this.resolveWaiters(stream);
     }
     this.streams.clear();
-    this.mqttIndexes.clear();
-    this.mqttChains.clear();
-    this.mqttGenerations.clear();
+    this.messageIndexes.clear();
+    this.messageChains.clear();
+    this.messageGenerations.clear();
   }
 
   private getStream(connectionId: string, direction: FaultDirection): TcpStream {

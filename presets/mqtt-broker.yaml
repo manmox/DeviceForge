@@ -1,0 +1,17 @@
+id: mqtt-broker
+name: MQTT 本机 Broker
+description: 在 127.0.0.1:1883 启动内嵌 Broker，接受多个 MQTT 客户端
+transport:
+  type: mqtt-broker
+  host: 127.0.0.1
+  port: 1883
+  publishTopic: deviceforge/demo/down
+  publishQos: 0
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules: []
+autoStart: false

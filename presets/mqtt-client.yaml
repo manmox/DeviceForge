@@ -1,0 +1,19 @@
+id: mqtt-client
+name: MQTT 发布订阅客户端
+description: 连接本机 1883 Broker，订阅和发布示例主题
+transport:
+  type: mqtt-client
+  url: mqtt://127.0.0.1:1883
+  subscriptions:
+    - topic: deviceforge/demo/down
+      qos: 0
+  publishTopic: deviceforge/demo/up
+  publishQos: 0
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules: []
+autoStart: false

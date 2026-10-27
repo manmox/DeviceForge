@@ -14,9 +14,9 @@ import { useAppStore } from '../store';
 const FEATURES = [
   {
     icon: Cable,
-    title: 'TCP 与 MQTT 接入',
+    title: '多种传输接入',
     description:
-      '设备可以监听 TCP 端口、主动连接 TCP 上游、连接 MQTT Broker，或在本机启动 Broker。',
+      '支持 TCP、UDP、物理与虚拟串口、HTTP、WebSocket 和 MQTT，可按设备协议选择监听、主动连接或消息服务。',
   },
   {
     icon: Waypoints,
@@ -85,17 +85,16 @@ export function Welcome({ onNew }: { onNew: (presetFile?: string) => void }) {
 
         <div className="mt-8 flex flex-wrap items-center gap-2 text-[11px] text-mist-500">
           <span className="chip border-accent-500/20 text-accent-300">
-            <Terminal className="h-3 w-3" /> TCP Server / Client（已支持）
+            <Terminal className="h-3 w-3" /> TCP / UDP / 串口（已支持）
           </span>
           <span className="chip border-sky-500/20 text-sky-300">
-            <Radio className="h-3 w-3 text-sky-400" /> MQTT Client / Broker（已支持）
+            <Radio className="h-3 w-3 text-sky-400" /> HTTP / WebSocket / MQTT（已支持）
           </span>
           <span className="chip opacity-70">
             <Cpu className="h-3 w-3 text-violet-400" /> Modbus · 规划中
           </span>
-          <span className="chip opacity-70">HTTP / WebSocket · 规划中</span>
           <span className="text-mist-500">
-            TCP 与 MQTT 传输 · 自定义帧与主题规则
+            串流、数据报与消息传输 · 自定义帧与规则
           </span>
         </div>
 

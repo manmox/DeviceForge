@@ -1,0 +1,21 @@
+id: websocket-echo
+name: WebSocket 消息响应
+description: 接受多个客户端，对每条文本或二进制消息返回 OK
+transport:
+  type: websocket-server
+  host: 127.0.0.1
+  port: 19081
+  path: /ws
+  maxMessageBytes: 1048576
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules:
+  - name: 返回 OK
+    on: frame
+    send:
+      hex: "4F4B"
+autoStart: false

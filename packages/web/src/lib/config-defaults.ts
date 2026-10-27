@@ -14,6 +14,12 @@ import type {
   MqttClientTransport,
   TcpClientTransport,
   TcpServerTransport,
+  UdpClientTransport,
+  UdpServerTransport,
+  SerialTransport,
+  VirtualSerialTransport,
+  HttpServerTransport,
+  WebSocketServerTransport,
   TransportConfig,
 } from '@deviceforge/core';
 import { fieldNeedsLength, isMultiByteFieldType, isNumericFieldType } from './codec-fields';
@@ -99,6 +105,12 @@ export function defaultTransport(type: 'tcp-server'): TcpServerTransport;
 export function defaultTransport(type: 'tcp-client'): TcpClientTransport;
 export function defaultTransport(type: 'mqtt-client'): MqttClientTransport;
 export function defaultTransport(type: 'mqtt-broker'): MqttBrokerTransport;
+export function defaultTransport(type: 'udp-server'): UdpServerTransport;
+export function defaultTransport(type: 'udp-client'): UdpClientTransport;
+export function defaultTransport(type: 'serial'): SerialTransport;
+export function defaultTransport(type: 'virtual-serial'): VirtualSerialTransport;
+export function defaultTransport(type: 'http-server'): HttpServerTransport;
+export function defaultTransport(type: 'websocket-server'): WebSocketServerTransport;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig {
   if (type === 'tcp-client') {
@@ -128,6 +140,35 @@ export function defaultTransport(type: TransportConfig['type']): TransportConfig
       publishQos: 0,
     };
   }
+  if (type === 'udp-server') return { type, host: '127.0.0.1', port: 19011 };
+  if (type === 'udp-client') return { type, host: '127.0.0.1', port: 19011, localPort: 0 };
+  if (type === 'serial') {
+    return {
+      type,
+      portPath: '/dev/ttyUSB0',
+      baudRate: 9600,
+      dataBits: 8,
+      stopBits: 1,
+      parity: 'none',
+      flowControl: 'none',
+    };
+  }
+  if (type === 'virtual-serial') {
+    return {
+      type,
+      baudRate: 9600,
+      dataBits: 8,
+      stopBits: 1,
+      parity: 'none',
+      flowControl: 'none',
+    };
+  }
+  if (type === 'http-server') {
+    return { type, host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 };
+  }
+  if (type === 'websocket-server') {
+    return { type, host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 };
+  }
   return { type: 'tcp-server', host: '127.0.0.1', port: 19010 };
 }
 
@@ -138,7 +179,7 @@ export function changeTransportType(
   if (current.type === type) return current;
 
   const host = 'host' in current ? current.host || '127.0.0.1' : '127.0.0.1';
-  const currentPort = 'port' in current ? current.port : 1883;
+  const currentPort = 'port' in current ? current.port : 0;
   if (type === 'mqtt-client' || type === 'mqtt-broker') {
     return defaultTransport(type);
   }
@@ -151,9 +192,30 @@ export function changeTransportType(
       port: currentPort > 0 ? currentPort : defaults.port,
     };
   }
+  if (type === 'tcp-server') {
+    const defaults = defaultTransport(type);
+    return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
+  }
+  if (type === 'udp-server') {
+    const defaults = defaultTransport(type);
+    return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
+  }
+  if (type === 'http-server') {
+    const defaults = defaultTransport(type);
+    return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
+  }
+  if (type === 'websocket-server') {
+    const defaults = defaultTransport(type);
+    return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
+  }
+  if (type === 'udp-client') {
+    const defaults = defaultTransport(type);
+    return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
+  }
+  if (type === 'serial' || type === 'virtual-serial') return defaultTransport(type);
 
   const defaults = defaultTransport('tcp-server');
-  return { ...defaults, host, port: currentPort };
+  return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
 }
 
 export function createBlankConfig(): DeviceConfig {

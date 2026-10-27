@@ -1,0 +1,25 @@
+id: virtual-serial-line
+name: 虚拟串口行协议
+description: 由 socat 创建临时 PTY 对，按 LF 分帧并对每行返回 OK
+transport:
+  type: virtual-serial
+  baudRate: 9600
+  dataBits: 8
+  stopBits: 1
+  parity: none
+  flowControl: none
+framing:
+  type: delimiter
+  delimiterFormat: text
+  delimiter: "\n"
+  includeDelimiter: false
+codec:
+  type: raw
+  display: ascii
+state: {}
+rules:
+  - name: 虚拟串口返回 OK
+    on: frame
+    send:
+      hex: "4F4B0D0A"
+autoStart: false

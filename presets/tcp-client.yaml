@@ -1,0 +1,20 @@
+id: tcp-client
+name: TCP 主动连接设备
+description: 设备启动后主动连接 127.0.0.1:19001，适合验证上游连接状态和手动发送
+transport:
+  type: tcp-client
+  host: 127.0.0.1
+  port: 19001
+  connectTimeoutMs: 5000
+  reconnect:
+    enabled: true
+    minDelayMs: 500
+    maxDelayMs: 10000
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules: []
+autoStart: false

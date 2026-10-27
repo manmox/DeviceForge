@@ -148,7 +148,7 @@ export function NewDeviceDialog({
             <p className="mt-0.5 text-xs text-mist-500">
               {step === 'presets'
                 ? '从预设开始，或使用空白配置自己定义协议。'
-                : '用可视化表单或 YAML 编辑配置；可选择 TCP 监听、主动连接或 MQTT Client / Broker。'}
+                : '用可视化表单或 YAML 编辑配置；支持 TCP、UDP、串口、HTTP、WebSocket 和 MQTT。'}
             </p>
           </div>
           <button
@@ -172,7 +172,7 @@ export function NewDeviceDialog({
                 </div>
                 <h3 className="mt-3 text-sm font-medium text-mist-100">空白配置</h3>
                 <p className="mt-1.5 text-xs leading-5 text-mist-500">
-                  一个空白 TCP Server 设备，可切换为 TCP Client、MQTT Client 或 MQTT Broker。
+                  空白 TCP Server 配置，可按需切换为任一支持的传输类型。
                 </p>
               </button>
 

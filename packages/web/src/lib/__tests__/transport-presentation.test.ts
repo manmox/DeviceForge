@@ -42,6 +42,11 @@ describe('transportPresentation', () => {
     expect(outbound.connectionTitle).toBe('上游连接');
     expect(outbound.sendTargetLabel).toBe('→ 上游连接');
     expect(outbound.isOutbound).toBe(true);
+
+    expect(transportPresentation('udp-server').sendTargetLabel).toBe('→ 最近来源端点');
+    expect(transportPresentation('http-server').kindLabel).toBe('HTTP Server');
+    expect(transportPresentation('websocket-server').connectionUnit).toBe('个客户端');
+    expect(transportPresentation('virtual-serial').endpointLabel).toBe('PTY 端点');
   });
 
   it('builds endpoint text for server, client and IPv6', () => {
@@ -75,6 +80,9 @@ describe('transportPresentation', () => {
     ).toBe('mqtt://127.0.0.1:1883');
     expect(formatHostPort('::1', 9000)).toBe('[::1]:9000');
     expect(formatHostPort('[::1]', 9000)).toBe('[::1]:9000');
+    expect(transportEndpoint({ type: 'http-server', host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 })).toBe('http://127.0.0.1:19080');
+    expect(transportEndpoint({ type: 'websocket-server', host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 })).toBe('ws://127.0.0.1:19081/ws');
+    expect(transportEndpoint({ type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' })).toBe('启动后由 socat 分配');
   });
 
   it('detects loopback targets', () => {

@@ -17,11 +17,14 @@
   "dependencies": {
     "aedes": "^1.2.0",
     "mqtt": "^5.16.1",
+    "serialport": "^13.0.0",
+    "ws": "^8.22.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
     "typescript": "5.9.3",
     "vitest": "^5.0.5"
   }

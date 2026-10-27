@@ -1,0 +1,27 @@
+id: http-health
+name: HTTP 健康检查服务
+description: 匹配 GET /health 并返回 200、文本响应头和 OK 响应体
+transport:
+  type: http-server
+  host: 127.0.0.1
+  port: 19080
+  maxBodyBytes: 1048576
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules:
+  - name: 健康检查
+    on: frame
+    match:
+      http.method: GET
+      http.path: /health
+    send:
+      hex: "4F4B"
+    httpResponse:
+      statusCode: 200
+      headers:
+        content-type: text/plain; charset=utf-8
+autoStart: false

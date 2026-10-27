@@ -70,7 +70,8 @@ export function SendPanel() {
   const brokerReady =
     device.config.transport.type === 'mqtt-broker' &&
     device.status.transport.state === 'listening';
-  const canSend = connected || brokerReady;
+  const httpServer = device.config.transport.type === 'http-server';
+  const canSend = !httpServer && (connected || brokerReady);
   const paused = device.status.transport.state === 'disconnected';
   const failed = device.status.transport.state === 'error';
   const displayError = error ?? draft.error;
@@ -133,7 +134,9 @@ export function SendPanel() {
               ? presentation.pausedLabel
               : failed
                 ? `${presentation.isOutbound ? '上游' : '连接'}失败，查看上方传输状态`
-                : presentation.waitingLabel}
+                : httpServer
+                  ? 'HTTP 响应由请求规则发送'
+                  : presentation.waitingLabel}
           </span>
         )}
         {sent && (

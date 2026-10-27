@@ -66,6 +66,18 @@ describe('transport defaults', () => {
       publishTopic: 'deviceforge/device/down',
       publishQos: 0,
     });
+    expect(defaultTransport('udp-server')).toEqual({ type: 'udp-server', host: '127.0.0.1', port: 19011 });
+    expect(defaultTransport('udp-client')).toEqual({ type: 'udp-client', host: '127.0.0.1', port: 19011, localPort: 0 });
+    expect(defaultTransport('serial')).toMatchObject({ type: 'serial', portPath: '/dev/ttyUSB0', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
+    expect(defaultTransport('virtual-serial')).toMatchObject({ type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
+    expect(defaultTransport('http-server')).toEqual({ type: 'http-server', host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 });
+    expect(defaultTransport('websocket-server')).toEqual({ type: 'websocket-server', host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 });
+    expect(defaultTransport('udp-server')).toEqual({ type: 'udp-server', host: '127.0.0.1', port: 19011 });
+    expect(defaultTransport('udp-client')).toEqual({ type: 'udp-client', host: '127.0.0.1', port: 19011, localPort: 0 });
+    expect(defaultTransport('serial')).toMatchObject({ type: 'serial', portPath: '/dev/ttyUSB0', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
+    expect(defaultTransport('virtual-serial')).toMatchObject({ type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
+    expect(defaultTransport('http-server')).toEqual({ type: 'http-server', host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 });
+    expect(defaultTransport('websocket-server')).toEqual({ type: 'websocket-server', host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 });
   });
 
   it('changes transport type while preserving compatible host and port', () => {
@@ -91,6 +103,9 @@ describe('transport defaults', () => {
     expect(changeTransportType(server, 'mqtt-client')).toMatchObject({
       type: 'mqtt-client',
       url: 'mqtt://127.0.0.1:1883',
+    });
+    expect(changeTransportType(toServer, 'http-server')).toMatchObject({
+      type: 'http-server', host: '192.168.1.20', port: 9000,
     });
   });
 

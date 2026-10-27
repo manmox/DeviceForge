@@ -1,6 +1,7 @@
 import type {
   CodecConfig,
   DeviceInfo,
+  HttpResponseConfig,
   OutgoingMessage,
   Rule,
 } from '@deviceforge/core';
@@ -57,6 +58,8 @@ export function RuleCard({
   codec,
   mqttEnabled = false,
   mqttClientId = false,
+  httpEnabled = false,
+  websocketEnabled = false,
   state,
   deviceInfo,
   onChange,
@@ -73,6 +76,8 @@ export function RuleCard({
   codec: CodecConfig;
   mqttEnabled?: boolean;
   mqttClientId?: boolean;
+  httpEnabled?: boolean;
+  websocketEnabled?: boolean;
   state: Record<string, unknown>;
   deviceInfo?: DeviceInfo;
   onChange: (next: Rule) => void;
@@ -86,6 +91,7 @@ export function RuleCard({
   const issues = useIssues(`rules.${index}`);
   const topicFilterIssue = useIssueText(`rules.${index}.topicFilter`);
   const publishTopicIssue = useIssueText(`rules.${index}.publishTopic`);
+  const httpStatusIssue = useIssueText(`rules.${index}.httpResponse.statusCode`);
   const dictionaries = useDictionaryRegistry();
   const bodyId = useId();
   const trigger = ruleTrigger(rule);
@@ -95,27 +101,31 @@ export function RuleCard({
   );
   const setCompletion = useMemo(
     () => ({
-      roots: templateRootsFor('rule-set', trigger, mqttEnabled),
+      roots: templateRootsFor('rule-set', trigger, mqttEnabled, httpEnabled, websocketEnabled),
       codec,
       dictionaries,
       state,
       deviceInfo,
       mqtt: mqttEnabled,
       mqttClientId,
+      http: httpEnabled,
+      websocket: websocketEnabled,
     }),
-    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId],
+    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId, httpEnabled, websocketEnabled],
   );
   const sendCompletion = useMemo(
     () => ({
-      roots: templateRootsFor('rule-send', trigger, mqttEnabled),
+      roots: templateRootsFor('rule-send', trigger, mqttEnabled, httpEnabled, websocketEnabled),
       codec,
       dictionaries,
       state,
       deviceInfo,
       mqtt: mqttEnabled,
       mqttClientId,
+      http: httpEnabled,
+      websocket: websocketEnabled,
     }),
-    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId],
+    [trigger, codec, dictionaries, state, deviceInfo, mqttEnabled, mqttClientId, httpEnabled, websocketEnabled],
   );
   const summaryParts = ruleSummaryParts(rule);
   if (summaryParts[0] === RULE_TRIGGER_LABELS[trigger]) summaryParts.shift();
@@ -147,7 +157,7 @@ export function RuleCard({
   }
 
   function unset(
-    key: 'id' | 'name' | 'set' | 'send' | 'match' | 'topicFilter' | 'publishTopic',
+    key: 'id' | 'name' | 'set' | 'send' | 'match' | 'topicFilter' | 'publishTopic' | 'httpResponse',
   ): Rule {
     const next = { ...rule };
     delete next[key];
@@ -176,6 +186,23 @@ export function RuleCard({
 
   function removeMessage(messageIndex: number) {
     onChange(setRuleSend(rule, messages.filter((_, itemIndex) => itemIndex !== messageIndex)));
+  }
+
+  function updateHttpResponse(patchValue: Partial<HttpResponseConfig>) {
+    patch({
+      httpResponse: {
+        statusCode: rule.httpResponse?.statusCode ?? 200,
+        headers: rule.httpResponse?.headers ?? {},
+        ...patchValue,
+      },
+    });
+  }
+
+  function updateHttpHeader(oldName: string | undefined, name: string, value: string) {
+    const headers = { ...(rule.httpResponse?.headers ?? {}) };
+    if (oldName && oldName !== name) delete headers[oldName];
+    if (name.trim()) headers[name.trim()] = value;
+    patch({ httpResponse: { statusCode: rule.httpResponse?.statusCode ?? 200, headers } });
   }
 
   return (
@@ -325,7 +352,11 @@ export function RuleCard({
                 onChange={(match) =>
                   match ? patch({ match }) : onChange(unset('match'))
                 }
-                suggestions={codecMatchFieldSuggestions(codec)}
+                suggestions={[
+                  ...codecMatchFieldSuggestions(codec),
+                  ...(httpEnabled ? ['http.method', 'http.path', 'http.query.id', 'http.headers.content_type'] : []),
+                  ...(websocketEnabled ? ['websocket.path', 'websocket.isBinary'] : []),
+                ]}
                 disabled={disabled}
                 path={`rules.${index}.match`}
               />
@@ -383,6 +414,66 @@ export function RuleCard({
               </div>
             )}
           </div>
+
+          {httpEnabled && trigger === 'frame' && (
+            <div className="rounded-lg border border-white/5 bg-white/[0.015] p-2.5">
+              <SwitchRow
+                label="HTTP 响应"
+                hint="每个请求只返回一条响应；命中多条规则时，第一条成功发送的规则处理响应。"
+                checked={rule.httpResponse !== undefined}
+                onChange={(enabled) =>
+                  enabled
+                    ? updateHttpResponse({})
+                    : onChange(unset('httpResponse'))
+                }
+                disabled={disabled}
+              />
+              {rule.httpResponse && (
+                <div className="mt-2 space-y-2">
+                  <FormField label="状态码" error={httpStatusIssue}>
+                    <NumberInput
+                      value={rule.httpResponse.statusCode}
+                      onChange={(statusCode) => updateHttpResponse({ statusCode: statusCode ?? 200 })}
+                      min={100}
+                      max={599}
+                      step={1}
+                      disabled={disabled}
+                      ariaLabel="HTTP 响应状态码"
+                    />
+                  </FormField>
+                  <div>
+                    <div className="mb-1 text-[11px] font-medium text-mist-300">响应头</div>
+                    <div className="space-y-1.5">
+                      {Object.entries(rule.httpResponse.headers).map(([name, value], headerIndex) => (
+                        <div key={`${name}-${headerIndex}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-1.5">
+                          <TextInput value={name} onChange={(next) => updateHttpHeader(name, next, value)} disabled={disabled} monospace placeholder="content-type" />
+                          <TextInput value={value} onChange={(next) => updateHttpHeader(name, name, next)} disabled={disabled} placeholder="text/plain" />
+                          <IconButton label={`删除响应头 ${name}`} danger onClick={() => {
+                            const headers = { ...rule.httpResponse!.headers };
+                            delete headers[name];
+                            updateHttpResponse({ headers });
+                          }} disabled={disabled}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm mt-1"
+                      onClick={() => {
+                        let suffix = Object.keys(rule.httpResponse!.headers).length + 1;
+                        let key = `x-deviceforge-${suffix}`;
+                        while (key in rule.httpResponse!.headers) key = `x-deviceforge-${++suffix}`;
+                        updateHttpHeader(undefined, key, '');
+                      }}
+                      disabled={disabled}
+                    >
+                      <Plus className="h-3.5 w-3.5" />添加响应头
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border border-white/5 bg-white/[0.015] p-2.5">
             <SwitchRow

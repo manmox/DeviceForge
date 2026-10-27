@@ -2,7 +2,7 @@
 
 本地运行的物联网设备仿真工作台。用配置描述设备行为，在本机端口模拟硬件，让上位机照常连接——设备掉线、内网穿透中断时，联调仍然可以继续。
 
-> **当前版本 v0.1**：完成 TCP 自定义帧核心、TCP Server/Client 传输、MQTT Client 与内嵌 Broker、声明式编解码、规则引擎、故障注入、流量录制回看和实时报文控制台。UDP、串口、HTTP/WebSocket 与 Modbus 仍在路线图中。
+> **当前版本 v0.1**：支持 TCP、UDP、物理与虚拟串口、MQTT、HTTP Server 和 WebSocket Server，并提供声明式编解码、规则引擎、故障注入、流量录制回看和实时报文控制台。Modbus 仍在路线图中。
 
 ## 为什么做这个
 
@@ -19,20 +19,24 @@
 - TCP client 设备（单个上游目标，启动不等待上游，指数退避自动重连）
 - MQTT Client（连接外部 Broker，按主题订阅和发布）
 - MQTT Broker（在本机启动 Broker，接受多个客户端连接）
+- UDP Server（按来源地址和端口隔离多个发送方）与 UDP Client（单一目标）
+- 物理串口和虚拟串口（Linux/macOS；虚拟串口由 `socat` 管理 PTY 对）
+- HTTP Server（HTTP/1.1 请求进入规则，响应可配置状态码、响应头和响应体）
+- WebSocket Server（多个客户端，分别处理文本和二进制消息）
 - 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
 - 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段编码）
 - 字段：`u8/i8/u16/i16/u24/i24/u32/i32/f32/f64`、`bytes`、`string`、`bcd`
 - 校验：`sum8`、`xor8`、`crc8`、`crc16-modbus`、`crc16-ccitt`、`crc32`、`lrc`
 - 规则：上线发送、收到匹配帧后响应、按周期上报、更新状态变量
-- 故障注入：TCP 字节流分段、MQTT 消息级故障规则，支持延迟、丢弃、断连和单 bit 损坏
+- 故障注入：TCP/串口字节流分段，UDP/MQTT/HTTP/WebSocket 消息级规则，支持延迟、丢弃、断连和单 bit 损坏
 - 流量录制回看：逐设备手动录制，保存收发事件和解码结果，支持时间轴、暂停、倍速、单步和删除
 - 模板：请求字段、设备状态、计数器、连接信息、设备信息和随机数
 - 设备信息：可选的厂商、型号、S/N、硬件/固件版本和厂商自定义 TNS/IMEI 元数据
 - Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看、全局数据字典管理
 - 配置持久化到 `data/devices.json`，本机自定义字典持久化到 `data/dictionaries.json`；报文和运行时状态保存在内存
 - 录制会话以追加式文件保存在 Git 忽略目录 `data/recordings/`，由用户手动删除
-- 内置 3 个预设，分别展示行协议、TCP 回显和传感器数据
+- 内置 12 个预设，覆盖 TCP、UDP、MQTT、物理与虚拟串口、HTTP 和 WebSocket
 
 ## 快速开始
 
@@ -47,7 +51,7 @@ pnpm dev
 
 - 前端：Vite `5173`，代理 `/api` 和 `/ws` 到后端
 - 控制面：Fastify `127.0.0.1:7321`
-- 模拟设备端口：由设备配置决定（预设使用 `19001`、`19002`、`19003`）
+- 模拟设备端点：由设备配置决定（预设使用 TCP `19001`–`19003`、UDP `19011`、HTTP `19080`、WebSocket `19081`；串口路径由设备或 PTY 分配）
 
 生产模式：
 
@@ -180,12 +184,105 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 
 ### 传输方式
 
-`transport.type` 支持 `tcp-server`、`tcp-client`、`mqtt-client` 和 `mqtt-broker`：
+`transport.type` 支持 `tcp-server`、`tcp-client`、`udp-server`、`udp-client`、`serial`、`virtual-serial`、`http-server`、`websocket-server`、`mqtt-client` 和 `mqtt-broker`：
 
 - **`tcp-server`**：设备监听 `host:port`，可接受多个上位机连接。`port: 0` 表示自动分配，实际端口以运行状态中的端点为准。
 - **`tcp-client`**：设备主动连接一个上游 `host:port`，用于模拟设备上报或网关连接。启动时不会等待上游可用；连接失败后按配置自动重连。
 - **`mqtt-client`**：设备连接外部 MQTT Broker，订阅配置中的主题过滤器，也可向默认主题发布消息。连接失败后自动重连，默认 Client ID 使用设备 ID。
 - **`mqtt-broker`**：设备在本机启动内嵌 MQTT Broker，默认监听 `127.0.0.1:1883`，可接受多个客户端；规则响应和手动发送均发布到配置主题，不要求当前已有客户端连接。
+- **`udp-server`**：监听 UDP 端口。每个来源地址和端口对应一个连接上下文，规则响应会发回该数据报的来源端点。
+- **`udp-client`**：绑定一个本地 UDP Socket 并面向单一目标收发；每个数据报直接作为一条完整消息，不参与 TCP 分帧。
+- **`serial`**：打开 `portPath` 指定的物理串口，默认 9600、8N1、无流控制。串口是字节流，使用与 TCP 相同的分帧器。
+- **`virtual-serial`**：启动 `socat` 创建一对临时 PTY。运行状态会展示设备端和工具端路径；停止设备时结束子进程并清理 PTY。仅支持 Linux/macOS。
+- **`http-server`**：监听独立 HTTP 端口，每个 HTTP 请求体作为一条消息。规则可匹配 `http.method`、`http.path`、`http.query.*` 和 `http.headers.*`，也可读取 `http.body` 与 `http.bodyBase64`。HTTP 规则的 `send` 定义响应体，`httpResponse` 定义状态码与响应头；每个请求只返回一条响应，首条成功发送的规则负责响应。
+- **`websocket-server`**：监听指定路径，支持多个并发客户端。每条 WebSocket 消息作为一条消息进入规则；回复发回相同连接，并沿用该客户端最近一条消息的文本或二进制类型。
+
+新增网络服务默认绑定 `127.0.0.1`。HTTP 和 WebSocket 的模拟服务端口独立于控制面。M2 不提供这些服务的 TLS 或认证；物理串口验收以 Linux/macOS 为准，Windows 串口支持后续加入。
+
+UDP Server 示例：
+
+```yaml
+transport:
+  type: udp-server
+  host: 127.0.0.1
+  port: 19011
+rules:
+  - on: frame
+    send:
+      hex: "4F4B"
+```
+
+UDP Client 示例：
+
+```yaml
+transport:
+  type: udp-client
+  host: 127.0.0.1
+  port: 19011
+  localPort: 0
+```
+
+HTTP Server 示例：
+
+```yaml
+transport:
+  type: http-server
+  host: 127.0.0.1
+  port: 19080
+rules:
+  - on: frame
+    match: { http.method: GET, http.path: /health }
+    set: { lastRequest: "$http.body" }
+    send:
+      hex: "4F4B"
+    httpResponse:
+      statusCode: 200
+      headers:
+        content-type: text/plain; charset=utf-8
+```
+
+WebSocket Server 示例：
+
+```yaml
+transport:
+  type: websocket-server
+  host: 127.0.0.1
+  port: 19081
+  path: /ws
+rules:
+  - on: frame
+    send:
+      hex: "4F4B"
+```
+
+串口参数由 `baudRate`、`dataBits`、`stopBits`、`parity` 和 `flowControl` 指定。物理串口示例默认路径为 `/dev/ttyUSB0`，需按实际设备调整。虚拟串口启动失败时，状态会显示 `socat` 缺失、无法创建 PTY 或路径超时等原因。
+
+物理串口配置示例：
+
+```yaml
+transport:
+  type: serial
+  portPath: /dev/ttyUSB0
+  baudRate: 9600
+  dataBits: 8
+  stopBits: 1
+  parity: none
+  flowControl: none
+```
+
+虚拟串口使用相同的串口参数，省略 `portPath`，启动后由应用创建 PTY 对：
+
+```yaml
+transport:
+  type: virtual-serial
+  baudRate: 9600
+  dataBits: 8
+  stopBits: 1
+  parity: none
+  flowControl: none
+```
+
+端到端联调可使用以下方式：`curl -i http://127.0.0.1:19080/health`；`websocat ws://127.0.0.1:19081/ws`；UDP 可用 `nc -u 127.0.0.1 19011`；虚拟串口启动后，将串口工具连接到状态中的工具端 PTY 路径。UDP 的请求与响应必须由同一来源端点收发；WebSocket 客户端上下文互相独立。
 
 TCP Client 示例：
 
@@ -244,7 +341,7 @@ rules:
       hex: AABB
 ```
 
-发布 QoS 由传输配置决定，出站 retain 固定关闭。MQTT Client 可填写 CA 文件；Broker 可同时填写证书和私钥启用 TLS。Broker 的用户名和密码为单组共享凭据。设备配置保存在本机 `data/devices.json`，其中的密码按明文保存；该目录由 Git 忽略。当前不提供 MQTT 5、QoS 2、WebSocket、主题 ACL、遗嘱或持久化会话。
+发布 QoS 由传输配置决定，出站 retain 固定关闭。MQTT Client 可填写 CA 文件；Broker 可同时填写证书和私钥启用 TLS。Broker 的用户名和密码为单组共享凭据。设备配置保存在本机 `data/devices.json`，其中的密码按明文保存；该目录由 Git 忽略。当前不提供 MQTT 5、QoS 2、MQTT over WebSocket、主题 ACL、遗嘱或持久化会话。
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -521,7 +618,7 @@ faultInjection:
 ## 项目结构
 
 ```text
-packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime、TCP 与 MQTT transport
+packages/core      设备引擎：schema、framing、codec、checksum、rules、runtime 与十种传输适配器
 packages/server    Fastify REST + WebSocket + MCP 传输/能力模块 + 应用服务 + JSON 持久化 + 静态托管
 packages/web       React + Vite + Tailwind 控制台
 presets/           内置 YAML 预设
@@ -561,6 +658,7 @@ pnpm start           # 生产模式（需要先 build）
 - TCP Client 传输：目标未启动时正常启动、自动重连、主动断开暂停、关闭重连、收发与字节计数
 - TCP Client 设备运行时集成：重连后重新执行 `on: connect`、断线发送报错、设备状态保持 `running`
 - MQTT Client 与内嵌 Broker：QoS 0/1 收发、共享认证、TLS 文件错误、重连、多客户端、主题规则过滤与覆盖、应用层 ACK 重试
+- M2 传输：UDP 多来源回复与单目标客户端、虚拟串口 PTY 与流分帧、HTTP 请求匹配/状态码/响应头/响应体、WebSocket 多客户端文本和二进制消息、配置 API 启停和全传输预设校验
 - 设备信息 `deviceInfo` 的 schema 解析和 Web 端元数据归一化/摘要
 - Web 端配置默认值、传输展示/状态文案、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
 
@@ -582,18 +680,18 @@ pnpm start           # 生产模式（需要先 build）
 
 | 里程碑 | 内容 |
 | --- | --- |
-| **M2 传输扩展（进行中）** | TCP Server / TCP Client / MQTT Broker / MQTT Client（已支持）；UDP（下一阶段）、串口、HTTP server、WebSocket server、虚拟串口（Linux/macOS socat，Windows com0com） |
+| **M2 传输扩展（已完成）** | TCP Server / TCP Client / MQTT Broker / MQTT Client / UDP Server / UDP Client / 物理串口 / 虚拟串口（Linux/macOS socat）/ HTTP Server / WebSocket Server；Windows 串口适配另行安排 |
 | **M3 Modbus（暂缓）** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
 | **M4 可靠性** | 故障注入和流量录制回看已支持；JS script codec（worker + vm）、透明代理、虚拟时钟、多设备场景、CI |
 | **更远** | CoAP、OPC UA、BACnet、BLE、pcapng 导出、可视化协议编辑器、Docker 发行 |
 
 ## 已知限制
 
-- TCP Client 为单目标。MQTT 仅支持 3.1.1 与 QoS 0/1；UDP、串口、HTTP/WebSocket 仍在路线图中。
+- TCP Client 和 UDP Client 均为单一目标。MQTT 仅支持 3.1.1 与 QoS 0/1；物理串口首轮支持 Linux/macOS，Windows 串口暂不支持。
 - 设备配置会持久化；实时流量历史和运行时状态不会跨服务重启保留，重启后状态回到配置中的 `state`。手动录制的会话保存在 `data/recordings/`，异常退出后以中断状态恢复读取。
 - 可视化编辑会重新生成 YAML，源码模式中的注释和原格式只在当前编辑会话、且未做可视化修改时保留；服务端本身只存 JSON。
 - 模板补全只在可视化模板输入中提供；YAML/JSON 源码模式没有补全。
-- TCP transport 不提供 TLS 或认证；MQTT Client 支持 mqtts 和 CA 文件，内嵌 Broker 支持 mqtts 与单组共享凭据。控制面默认只绑定 `127.0.0.1`，不要直接暴露到公网。
+- TCP、UDP、HTTP 和 WebSocket 模拟服务不提供 TLS 或认证；MQTT Client 支持 mqtts 和 CA 文件，内嵌 Broker 支持 mqtts 与单组共享凭据。控制面和新增网络服务默认绑定 `127.0.0.1`，不要直接暴露到公网。
 - `raw` framing 在 TCP 上把每个数据块当作一帧，不保证与业务消息边界一致；带明确边界的协议请使用 length-prefix/delimiter/fixed。
 - JS script codec、透明代理、虚拟时钟和多设备场景尚未实现；当前 UI 中的协议标签已标注“规划中”。
 - 所有数据字典均为本机自定义数据，保存在 Git 忽略的 `data/dictionaries.json`。被设备引用的字典不能删除。
@@ -601,7 +699,7 @@ pnpm start           # 生产模式（需要先 build）
 
 ## 设计约定
 
-- **入站分帧、出站编码**：Framer 只拆分字节流，Codec 负责完整帧的编码/解码（含长度、常量、校验）。
+- **字节流与消息边界**：TCP 和串口经 Framer 拆帧；UDP 数据报、MQTT 发布载荷、HTTP 请求体和 WebSocket 消息各自构成一条完整运行时消息。Codec 负责完整消息的编解码（含长度、常量、校验）。
 - **设备状态是设备级的**：`state` 被所有连接共享；`req/conn/counter` 是请求或连接上下文。
 - **运行状态与传输状态分离**：设备是否启动由 `status.state` 表示，连接/重连由 `status.transport` 表示；上游不可达不会把设备判为启动失败。
 - **规则按顺序执行**：一帧可以命中多条规则；每条规则的 `set` 在发送前生效。

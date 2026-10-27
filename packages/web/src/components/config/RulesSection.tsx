@@ -179,6 +179,8 @@ export function RulesSection({
                   config.transport.type === 'mqtt-broker'
                 }
                 mqttClientId={config.transport.type === 'mqtt-broker'}
+                httpEnabled={config.transport.type === 'http-server'}
+                websocketEnabled={config.transport.type === 'websocket-server'}
                 state={config.state}
                 deviceInfo={config.deviceInfo}
                 onChange={(next) => updateRule(index, next)}

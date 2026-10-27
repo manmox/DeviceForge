@@ -46,6 +46,54 @@ export const TcpClientTransportSchema = z.object({
   reconnect: ReconnectConfigSchema.default({ ...DEFAULT_RECONNECT_CONFIG }),
 });
 
+export const UdpServerTransportSchema = z.object({
+  type: z.literal('udp-server'),
+  host: HostSchema,
+  port: PortSchema,
+});
+
+export const UdpClientTransportSchema = z.object({
+  type: z.literal('udp-client'),
+  host: HostSchema,
+  port: z.number().int().min(1).max(65535),
+  localHost: z.string().min(1).optional(),
+  localPort: PortSchema.default(0),
+});
+
+const SerialLineConfigShape = {
+  baudRate: z.number().int().min(50).max(4_000_000).default(9_600),
+  dataBits: z.union([z.literal(5), z.literal(6), z.literal(7), z.literal(8)]).default(8),
+  stopBits: z.union([z.literal(1), z.literal(1.5), z.literal(2)]).default(1),
+  parity: z.enum(['none', 'even', 'odd']).default('none'),
+  flowControl: z.enum(['none', 'rtscts', 'xon-xoff']).default('none'),
+};
+
+export const SerialTransportSchema = z.object({
+  type: z.literal('serial'),
+  portPath: z.string().min(1, '串口路径不能为空'),
+  ...SerialLineConfigShape,
+});
+
+export const VirtualSerialTransportSchema = z.object({
+  type: z.literal('virtual-serial'),
+  ...SerialLineConfigShape,
+});
+
+export const HttpServerTransportSchema = z.object({
+  type: z.literal('http-server'),
+  host: HostSchema,
+  port: PortSchema,
+  maxBodyBytes: z.number().int().min(1).max(16 * 1024 * 1024).default(1_048_576),
+});
+
+export const WebSocketServerTransportSchema = z.object({
+  type: z.literal('websocket-server'),
+  host: HostSchema,
+  port: PortSchema,
+  path: z.string().startsWith('/').default('/ws'),
+  maxMessageBytes: z.number().int().min(1).max(16 * 1024 * 1024).default(1_048_576),
+});
+
 export const MqttQosSchema = z.union([z.literal(0), z.literal(1)]);
 
 export const MqttSubscriptionSchema = z.object({
@@ -158,6 +206,12 @@ export const MqttBrokerTransportSchema = z
 export const TransportSchema = z.discriminatedUnion('type', [
   TcpServerTransportSchema,
   TcpClientTransportSchema,
+  UdpServerTransportSchema,
+  UdpClientTransportSchema,
+  SerialTransportSchema,
+  VirtualSerialTransportSchema,
+  HttpServerTransportSchema,
+  WebSocketServerTransportSchema,
   MqttClientTransportSchema,
   MqttBrokerTransportSchema,
 ]);
@@ -850,6 +904,12 @@ export const OutgoingMessageSchema = z
     message: 'send 必须且只能包含 fields 或 hex 之一',
   });
 
+export const HttpResponseConfigSchema = z.object({
+  statusCode: z.number().int().min(100).max(599).default(200),
+  headers: z.record(z.string(), z.string()).default({}),
+});
+export type HttpResponseConfig = z.infer<typeof HttpResponseConfigSchema>;
+
 export const MatchValueSchema = z.union([
   z.string(),
   z.number(),
@@ -883,6 +943,7 @@ export const RuleSchema = z
     target: z.enum(['all', 'last']).default('all'),
     set: z.record(z.string(), z.unknown()).optional(),
     send: z.union([OutgoingMessageSchema, z.array(OutgoingMessageSchema)]).optional(),
+    httpResponse: HttpResponseConfigSchema.optional(),
     disconnect: z.boolean().default(false),
   })
   .superRefine((rule, ctx) => {
@@ -993,21 +1054,60 @@ export const DeviceConfigSchema = z.object({
   const isMqtt =
     config.transport.type === 'mqtt-client' ||
     config.transport.type === 'mqtt-broker';
-  if (isMqtt) return;
+  if (!isMqtt) {
+    config.rules.forEach((rule, index) => {
+      if (rule.topicFilter !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['rules', index, 'topicFilter'],
+          message: '主题过滤条件仅适用于 MQTT 传输',
+        });
+      }
+      if (rule.publishTopic !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['rules', index, 'publishTopic'],
+          message: '规则发布主题仅适用于 MQTT 传输',
+        });
+      }
+    });
+  }
 
   config.rules.forEach((rule, index) => {
-    if (rule.topicFilter !== undefined) {
+    if (rule.httpResponse !== undefined && config.transport.type !== 'http-server') {
       ctx.addIssue({
         code: 'custom',
-        path: ['rules', index, 'topicFilter'],
-        message: '主题过滤条件仅适用于 MQTT 传输',
+        path: ['rules', index, 'httpResponse'],
+        message: 'HTTP 响应配置仅适用于 HTTP Server',
       });
     }
-    if (rule.publishTopic !== undefined) {
+    if (rule.httpResponse !== undefined && (rule.every !== undefined || rule.on === 'start' || rule.on === 'connect')) {
       ctx.addIssue({
         code: 'custom',
-        path: ['rules', index, 'publishTopic'],
-        message: '规则发布主题仅适用于 MQTT 传输',
+        path: ['rules', index, 'httpResponse'],
+        message: 'HTTP 响应配置只能用于请求触发的规则',
+      });
+    }
+    if (
+      config.transport.type === 'http-server' &&
+      rule.send !== undefined &&
+      (rule.every !== undefined || rule.on === 'start' || rule.on === 'connect')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rules', index, 'send'],
+        message: 'HTTP Server 只能在收到请求后发送响应',
+      });
+    }
+    if (
+      config.transport.type === 'http-server' &&
+      rule.send !== undefined &&
+      Array.isArray(rule.send)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rules', index, 'send'],
+        message: 'HTTP 请求只允许发送一个响应报文',
       });
     }
   });
@@ -1015,6 +1115,12 @@ export const DeviceConfigSchema = z.object({
 
 export type TcpServerTransport = z.infer<typeof TcpServerTransportSchema>;
 export type TcpClientTransport = z.infer<typeof TcpClientTransportSchema>;
+export type UdpServerTransport = z.infer<typeof UdpServerTransportSchema>;
+export type UdpClientTransport = z.infer<typeof UdpClientTransportSchema>;
+export type SerialTransport = z.infer<typeof SerialTransportSchema>;
+export type VirtualSerialTransport = z.infer<typeof VirtualSerialTransportSchema>;
+export type HttpServerTransport = z.infer<typeof HttpServerTransportSchema>;
+export type WebSocketServerTransport = z.infer<typeof WebSocketServerTransportSchema>;
 export type MqttClientTransport = z.infer<typeof MqttClientTransportSchema>;
 export type MqttBrokerTransport = z.infer<typeof MqttBrokerTransportSchema>;
 export type MqttSubscription = z.infer<typeof MqttSubscriptionSchema>;

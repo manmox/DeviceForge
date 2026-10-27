@@ -19,6 +19,8 @@ export type TemplateRoot =
   | 'conn'
   | 'device'
   | 'mqtt'
+  | 'http'
+  | 'websocket'
   | 'now';
 
 export type TemplateSuggestionKind =
@@ -38,6 +40,8 @@ export interface TemplateCompletionContext {
   deviceInfo?: DeviceInfo;
   mqtt?: boolean;
   mqttClientId?: boolean;
+  http?: boolean;
+  websocket?: boolean;
   counters?: readonly ('tx' | 'rx')[];
   /** 默认值 4。 */
   maxStateDepth?: number;
@@ -111,6 +115,8 @@ const ROOT_ORDER: TemplateRoot[] = [
   'conn',
   'device',
   'mqtt',
+  'http',
+  'websocket',
   'now',
 ];
 
@@ -118,10 +124,14 @@ export function templateRootsFor(
   scope: TemplateScope,
   trigger?: RuleTrigger,
   mqttEnabled = false,
+  httpEnabled = false,
+  websocketEnabled = false,
 ): TemplateRoot[] {
   const roots: TemplateRoot[] = [];
   if (scope !== 'manual-send' && trigger === 'frame') roots.push('req');
   if (mqttEnabled && scope !== 'manual-send' && trigger === 'frame') roots.push('mqtt');
+  if (httpEnabled && scope !== 'manual-send' && trigger === 'frame') roots.push('http');
+  if (websocketEnabled && scope !== 'manual-send' && trigger === 'frame') roots.push('websocket');
   roots.push('state', 'counter');
   if (
     scope === 'manual-send' ||
@@ -669,6 +679,10 @@ function rootHasChildren(
       return deviceCandidates(context).length > 0;
     case 'mqtt':
       return context.mqtt === true;
+    case 'http':
+      return context.http === true;
+    case 'websocket':
+      return context.websocket === true;
     case 'now':
       return false;
   }
@@ -684,6 +698,8 @@ const ROOT_DESCRIPTIONS: Record<
   conn: { description: '当前连接信息', detail: '发送目标连接' },
   device: { description: '设备信息', detail: '型号、序列号、TNS/IMEI 等' },
   mqtt: { description: '触发消息的 MQTT 元数据', detail: '主题、QoS、retain、Client ID' },
+  http: { description: '当前 HTTP 请求', detail: '方法、路径、查询参数、请求头和请求体' },
+  websocket: { description: '当前 WebSocket 消息', detail: '路径、文本或二进制、请求头' },
   now: { description: '当前时间戳（毫秒）' },
 };
 
@@ -753,6 +769,21 @@ function memberCandidates(
       ? mqttCandidates(context.mqttClientId === true)
       : [];
   }
+  if (root === 'http') {
+    if (token.parentSegments.length === 1 && context.http) return httpCandidates();
+    if (token.parentSegments.length === 2 && context.http) {
+      if (token.parentSegments[1] === 'query') return httpDynamicCandidates('query');
+      if (token.parentSegments[1] === 'headers') return httpDynamicCandidates('headers');
+    }
+    return [];
+  }
+  if (root === 'websocket') {
+    if (token.parentSegments.length === 1 && context.websocket) return websocketCandidates();
+    if (token.parentSegments.length === 2 && token.parentSegments[1] === 'headers' && context.websocket) {
+      return httpDynamicCandidates('headers', 'websocket');
+    }
+    return [];
+  }
   if (root === 'now') return [];
 
   const maxDepth = context.maxStateDepth ?? DEFAULT_MAX_STATE_DEPTH;
@@ -808,6 +839,58 @@ function mqttCandidates(includeClientId: boolean): Candidate[] {
     });
   }
   return candidates;
+}
+
+function httpCandidates(): Candidate[] {
+  return [
+    ['requestId', '请求 ID', false],
+    ['method', '请求方法', false],
+    ['url', '请求目标', false],
+    ['path', '请求路径', false],
+    ['query', '查询参数，可继续选择参数名', true],
+    ['headers', '请求头，可继续选择字段名', true],
+    ['body', 'UTF-8 请求体', false],
+    ['bodyBase64', 'Base64 请求体', false],
+  ].map(([name, description, hasChildren]) => ({
+    id: `http:${name}`,
+    kind: 'field' as const,
+    name: String(name),
+    fullPath: `http.${String(name)}`,
+    description: String(description),
+    detail: 'HTTP 请求',
+    hasChildren: Boolean(hasChildren),
+  }));
+}
+
+function websocketCandidates(): Candidate[] {
+  return [
+    ['path', 'WebSocket 请求路径', false],
+    ['isBinary', '当前消息是否为二进制', false],
+    ['headers', '握手请求头，可继续选择字段名', true],
+  ].map(([name, description, hasChildren]) => ({
+    id: `websocket:${name}`,
+    kind: 'field' as const,
+    name: String(name),
+    fullPath: `websocket.${String(name)}`,
+    description: String(description),
+    detail: 'WebSocket 消息',
+    hasChildren: Boolean(hasChildren),
+  }));
+}
+
+function httpDynamicCandidates(parent: 'query' | 'headers', root = 'http'): Candidate[] {
+  const names = parent === 'headers'
+    ? ['accept', 'authorization', 'content_length', 'content_type', 'user_agent']
+    : ['id', 'page', 'q', 'type'];
+  return names.map((name) => ({
+    id: `${parent}:${name}`,
+    kind: 'field' as const,
+    name,
+    fullPath: `${root}.${parent}.${name}`,
+    description: parent === 'headers' ? '请求头字段（连字符以下划线表示）' : '查询参数',
+    detail: '文本',
+    hasChildren: false,
+  }));
 }
 
 function toSuggestion(

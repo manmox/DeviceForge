@@ -27,6 +27,9 @@ export function ConnectionsPanel() {
     device.config.transport,
     device.status.endpoints,
   );
+  const endpointLabel = device.config.transport.type === 'virtual-serial' && device.status.endpoints.length > 1
+    ? device.status.endpoints.join(' ↔ ')
+    : endpoint;
   const paused = device.status.transport.state === 'disconnected';
   const failed = device.status.transport.state === 'error';
 
@@ -44,7 +47,7 @@ export function ConnectionsPanel() {
             <h3 className="text-sm font-medium text-mist-100">
               {presentation.connectionTitle}
             </h3>
-            <p className="mt-0.5 font-mono text-[11px] text-mist-500">{endpoint}</p>
+            <p className="mt-0.5 font-mono text-[11px] text-mist-500">{endpointLabel}</p>
           </div>
           <span className="chip">{connections.length}</span>
         </div>

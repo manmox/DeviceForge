@@ -5,16 +5,21 @@ import { createFramer, type FrameDecoder } from '../framing';
 import { matchesFields } from '../rules/matcher';
 import { evaluate, evaluateFields, type TemplateContext } from '../rules/template';
 import { mqttTopicMatchesFilter } from '../common/mqtt-topic';
-import type { DeviceConfig, OutgoingMessage, Rule } from '../schema/device';
+import type { DeviceConfig, HttpResponseConfig, OutgoingMessage, Rule } from '../schema/device';
 import { createTransport } from '../transport';
-import type { TransportAdapter } from '../transport/types';
+import type { TransportAdapter, TransportSendOptions } from '../transport/types';
 import type {
   ConnectionInfo,
   Counters,
   DeviceStatus,
+  HttpRequestMetadata,
+  HttpResponseTrafficMetadata,
+  HttpTrafficMetadata,
   MqttMessageMetadata,
+  TransportMessageMetadata,
   TransportStatus,
   TrafficEvent,
+  WebSocketMessageMetadata,
 } from '../types';
 import { EventBus } from './event-bus';
 import {
@@ -40,6 +45,9 @@ export interface SendOptions {
   rule?: string;
   publishTopic?: string;
   mqtt?: MqttMessageMetadata;
+  http?: HttpRequestMetadata;
+  httpResponse?: HttpResponseConfig;
+  websocket?: WebSocketMessageMetadata;
   silentIfNoConnection?: boolean;
 }
 
@@ -50,6 +58,12 @@ export interface DeviceRuntimeOptions {
 }
 
 type RuleTrigger = 'start' | 'connect' | 'frame' | 'interval';
+
+function isMessageTransport(type: DeviceConfig['transport']['type']): boolean {
+  return type === 'mqtt-client' || type === 'mqtt-broker' ||
+    type === 'udp-server' || type === 'udp-client' ||
+    type === 'http-server' || type === 'websocket-server';
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -74,6 +88,8 @@ function idleTransportStatus(config: DeviceConfig): TransportStatus {
   return { kind: config.transport.type, state: 'idle' };
 }
 
+const SENSITIVE_HTTP_FIELDS = /^(?:authorization|proxy-authorization|cookie|set-cookie|password|passwd|token|access_token|refresh_token|api[_-]?key|secret)$/i;
+
 export class DeviceRuntime {
   private _config: DeviceConfig;
   private readonly bus = new EventBus<DeviceEventMap>();
@@ -95,6 +111,7 @@ export class DeviceRuntime {
   private state: Record<string, unknown>;
   private templateCounters: Record<string, number> = { tx: 0, rx: 0 };
   private transport?: TransportAdapter;
+  private readonly respondedHttpRequests = new Set<string>();
   private protocolSession: ProtocolSession;
   private status: DeviceStatus;
   private stopping = false;
@@ -250,6 +267,7 @@ export class DeviceRuntime {
     await this.setFaultInjectionEnabled(false);
     this.framers.clear();
     this.frameQueues.clear();
+    this.respondedHttpRequests.clear();
 
     const transport = this.transport;
     this.transport = undefined;
@@ -308,6 +326,7 @@ export class DeviceRuntime {
   }
 
   async send(message: OutgoingMessage, options: SendOptions = {}): Promise<void> {
+    if (options.http && this.respondedHttpRequests.has(options.http.requestId)) return;
     const transport = this.transport;
     if (!transport) throw new Error('设备未启动');
 
@@ -321,7 +340,9 @@ export class DeviceRuntime {
     } else if (options.connectionId) {
       if (!byId.has(options.connectionId)) throw new Error('指定的连接已断开');
       targetIds = [options.connectionId];
-    } else if ((options.target ?? 'all') === 'last') {
+    } else if ((options.target ?? (
+      transport.kind === 'udp-server' || transport.kind === 'websocket-server' ? 'last' : 'all'
+    )) === 'last') {
       const last = transport.lastConnectionId();
       targetIds = last ? [last] : [];
     } else {
@@ -338,14 +359,20 @@ export class DeviceRuntime {
     const prepared =
       this.codec.prepareOutbound?.(
         message,
-        this.templateContext(undefined, options.req, options.mqtt),
+        this.templateContext(undefined, options.req, options.mqtt, options.http, options.websocket),
       ) ?? { message };
 
     for (const connectionId of targetIds) {
       const connection = byId.get(connectionId);
       if (!connection && !isMqttBroker) continue;
 
-      const templateContext = this.templateContext(connectionId, options.req, options.mqtt);
+      const templateContext = this.templateContext(
+        connectionId,
+        options.req,
+        options.mqtt,
+        options.http,
+        options.websocket,
+      );
       const resolvedFields = prepared.message.fields
         ? evaluateFields(prepared.message.fields, templateContext)
         : undefined;
@@ -371,19 +398,37 @@ export class DeviceRuntime {
         decoded?.valid === true &&
         String(decoded.fields[prepared.track.field] ?? '') ===
           prepared.track.key;
-      const pending: PendingHandle | undefined = trackable
+      const supportsAckRetry =
+        transport.kind === 'tcp-server' || transport.kind === 'tcp-client' ||
+        transport.kind === 'mqtt-client' || transport.kind === 'mqtt-broker';
+      const pending: PendingHandle | undefined = trackable && supportsAckRetry
         ? connectionId
           ? this.protocolSession.register(connectionId, prepared.track!, data, options.publishTopic)
           : undefined
         : undefined;
+      const transportOptions: TransportSendOptions = {
+        topic: options.publishTopic,
+        http: options.http
+          ? {
+              requestId: options.http.requestId,
+              statusCode: options.httpResponse?.statusCode,
+            headers: options.httpResponse?.headers,
+            request: options.http,
+            }
+          : undefined,
+        websocket: options.websocket
+          ? { isBinary: options.websocket.isBinary, metadata: options.websocket }
+          : undefined,
+      };
 
       try {
         await this.sendThroughFaultInjector(
           transport,
           connectionId,
           data,
-          options.publishTopic,
+          transportOptions,
         );
+        if (options.http) this.respondedHttpRequests.add(options.http.requestId);
         if (pending) this.protocolSession.arm(pending);
       } catch (error) {
         if (pending) this.protocolSession.cancel(pending);
@@ -409,6 +454,14 @@ export class DeviceRuntime {
             ? '故障注入结果详见系统事件'
             : undefined,
         mqtt: this.outgoingMqttMetadata(options.publishTopic),
+        http: options.http ? this.safeHttpMetadata(options.http) : undefined,
+        httpResponse: options.http
+          ? ({
+              statusCode: options.httpResponse?.statusCode ?? 200,
+              headers: this.redactHttpFields(options.httpResponse?.headers ?? {}),
+            } satisfies HttpResponseTrafficMetadata)
+          : undefined,
+        websocket: options.websocket ? this.safeWebSocketMetadata(options.websocket) : undefined,
       });
     }
   }
@@ -466,16 +519,13 @@ export class DeviceRuntime {
   private handleData(
     connectionId: string,
     data: Buffer,
-    metadata?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): void {
     this.counters.rxBytes += data.length;
 
-    if (
-      this._config.transport.type === 'mqtt-client' ||
-      this._config.transport.type === 'mqtt-broker'
-    ) {
+    if (isMessageTransport(this._config.transport.type)) {
       void this.faultInjector
-        .processMqtt(connectionId, 'in', data)
+        .processMessage(connectionId, 'in', data)
         .then(async (result) => {
           if (result.applied) this.recordAppliedFault(result.applied, metadata);
           if (result.applied?.action === 'disconnect') {
@@ -534,7 +584,7 @@ export class DeviceRuntime {
   private enqueueFrame(
     connectionId: string,
     frame: Buffer,
-    metadata?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): void {
     const previous = this.frameQueues.get(connectionId) ?? Promise.resolve();
     const next = previous
@@ -553,7 +603,7 @@ export class DeviceRuntime {
   private async handleFrame(
     connectionId: string,
     frame: Buffer,
-    metadata?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): Promise<void> {
     let decoded;
     try {
@@ -569,12 +619,27 @@ export class DeviceRuntime {
         data: frame.toString('hex'),
         size: frame.length,
         error: message,
-        mqtt: metadata,
+        mqtt: metadata?.mqtt,
+        http: metadata?.http ? this.safeHttpMetadata(metadata.http) : undefined,
+        websocket: metadata?.websocket ? this.safeWebSocketMetadata(metadata.websocket) : undefined,
       });
       this.bus.emit('error', { deviceId: this.id, message, connectionId });
+      if (metadata?.http) {
+        await this.transport?.finishRequest?.(connectionId, metadata.http, 400);
+      }
       return;
     }
 
+    const requestFields = {
+      ...decoded.fields,
+      ...(metadata?.http ? { http: this.templateHttpMetadata(metadata.http) } : {}),
+      ...(metadata?.websocket ? { websocket: this.templateWebSocketMetadata(metadata.websocket) } : {}),
+    };
+    const trafficFields = {
+      ...decoded.fields,
+      ...(metadata?.http ? { http: this.safeHttpMetadata(metadata.http) } : {}),
+      ...(metadata?.websocket ? { websocket: this.safeWebSocketMetadata(metadata.websocket) } : {}),
+    };
     this.pushTraffic({
       id: randomUUID(),
       deviceId: this.id,
@@ -583,10 +648,12 @@ export class DeviceRuntime {
       direction: 'in',
       data: frame.toString('hex'),
       size: frame.length,
-      decoded: decoded.fields,
+      decoded: trafficFields,
       error: decoded.error,
       note: decoded.warnings?.length ? decoded.warnings.join('; ') : undefined,
-      mqtt: metadata,
+      mqtt: metadata?.mqtt,
+      http: metadata?.http ? this.safeHttpMetadata(metadata.http) : undefined,
+      websocket: metadata?.websocket ? this.safeWebSocketMetadata(metadata.websocket) : undefined,
     });
 
     if (!decoded.valid) {
@@ -595,6 +662,9 @@ export class DeviceRuntime {
         message: decoded.error ?? '报文校验失败',
         connectionId,
       });
+      if (metadata?.http) {
+        await this.transport?.finishRequest?.(connectionId, metadata.http, 400);
+      }
       return;
     }
 
@@ -608,15 +678,16 @@ export class DeviceRuntime {
       );
     }
 
-    await this.runTrigger('frame', connectionId, decoded.fields, metadata);
+    await this.runTrigger('frame', connectionId, requestFields, metadata);
+    if (metadata?.http) {
+      await this.transport?.finishRequest?.(connectionId, metadata.http);
+      this.respondedHttpRequests.delete(metadata.http.requestId);
+    }
   }
 
   private handleConnect(connection: ConnectionInfo): void {
     this.faultInjector.openConnection(connection.id);
-    if (
-      this._config.transport.type !== 'mqtt-client' &&
-      this._config.transport.type !== 'mqtt-broker'
-    ) {
+    if (!isMessageTransport(this._config.transport.type)) {
       this.framers.set(connection.id, createFramer(this._config.framing));
     }
     this.pushTraffic(this.systemEvent(`连接已建立 ${remoteLabel(connection)}`, connection.id));
@@ -680,7 +751,7 @@ export class DeviceRuntime {
       throw new Error('连接已断开');
     }
 
-    await this.sendThroughFaultInjector(transport, connectionId, data, ctx.topic);
+    await this.sendThroughFaultInjector(transport, connectionId, data, { topic: ctx.topic });
     this.counters.txFrames += 1;
     this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
 
@@ -705,7 +776,7 @@ export class DeviceRuntime {
     trigger: RuleTrigger,
     connectionId?: string,
     req?: Record<string, unknown>,
-    mqtt?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): Promise<void> {
     for (const rule of this.rules) {
       if (!rule.enabled) continue;
@@ -713,9 +784,9 @@ export class DeviceRuntime {
       if (trigger === 'frame' && !matchesFields(req ?? {}, rule.match)) continue;
       if (
         rule.topicFilter !== undefined &&
-        (!mqtt || !mqttTopicMatchesFilter(mqtt.topic, rule.topicFilter))
+        (!metadata?.mqtt || !mqttTopicMatchesFilter(metadata.mqtt.topic, rule.topicFilter))
       ) continue;
-      await this.applyRule(rule, connectionId, req, mqtt);
+      await this.applyRule(rule, connectionId, req, metadata);
     }
   }
 
@@ -723,10 +794,16 @@ export class DeviceRuntime {
     rule: Rule,
     connectionId?: string,
     req?: Record<string, unknown>,
-    mqtt?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): Promise<void> {
     const trigger = ruleTrigger(rule);
-    const context = this.templateContext(connectionId, req, mqtt);
+    const context = this.templateContext(
+      connectionId,
+      req,
+      metadata?.mqtt,
+      metadata?.http,
+      metadata?.websocket,
+    );
 
     if (rule.set) {
       try {
@@ -768,7 +845,10 @@ export class DeviceRuntime {
           req,
           rule: ruleLabel(rule),
           publishTopic,
-          mqtt,
+          mqtt: metadata?.mqtt,
+          http: metadata?.http,
+          httpResponse: rule.httpResponse,
+          websocket: metadata?.websocket,
           silentIfNoConnection: trigger === 'interval' || trigger === 'start',
         });
       } catch (error) {
@@ -846,6 +926,8 @@ export class DeviceRuntime {
     connectionId?: string,
     req?: Record<string, unknown>,
     mqtt?: MqttMessageMetadata,
+    http?: HttpRequestMetadata,
+    websocket?: WebSocketMessageMetadata,
   ): TemplateContext {
     const connection = connectionId
       ? this.transport?.connections().find((item) => item.id === connectionId)
@@ -857,6 +939,8 @@ export class DeviceRuntime {
       counters: this.templateCounters,
       conn: connection,
       mqtt,
+      http: http ? this.templateHttpMetadata(http) : undefined,
+      websocket: websocket ? this.templateWebSocketMetadata(websocket) : undefined,
       device: this._config.deviceInfo,
       now: Date.now(),
     };
@@ -878,35 +962,47 @@ export class DeviceRuntime {
     transport: TransportAdapter,
     connectionId: string,
     data: Buffer,
-    topic?: string,
+    options: TransportSendOptions = {},
   ): Promise<void> {
-    if (transport.kind === 'mqtt-client' || transport.kind === 'mqtt-broker') {
-      const result = await this.faultInjector.processMqtt(connectionId, 'out', data);
+    if (isMessageTransport(transport.kind)) {
+      const result = await this.faultInjector.processMessage(connectionId, 'out', data);
       if (result.applied) {
-        this.recordAppliedFault(result.applied, this.outgoingMqttMetadata(topic));
+        this.recordAppliedFault(result.applied, {
+          mqtt: this.outgoingMqttMetadata(options.topic),
+          http: options.http?.request,
+          websocket: options.websocket?.metadata,
+        });
       }
       if (result.applied?.action === 'disconnect') {
-        await transport.disconnect(connectionId);
+        if (connectionId) await transport.disconnect(connectionId);
         return;
       }
-      if (!result.data) return;
-      await transport.send(connectionId, result.data, { topic });
+      if (!result.data) {
+        if (options.http?.request) {
+          await transport.finishRequest?.(connectionId, options.http.request, 0);
+        }
+        return;
+      }
+      await transport.send(connectionId, result.data, options);
       this.counters.txBytes += result.data.length;
       return;
     }
 
     await this.faultInjector.pushTcp(connectionId, 'out', data, async (segment) => {
-      await transport.send(connectionId, segment, { topic });
+      await transport.send(connectionId, segment, options);
       this.counters.txBytes += segment.length;
     });
   }
 
   private recordAppliedFault(
     event: AppliedFault,
-    mqtt?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): void {
     const direction = event.direction === 'in' ? '入站' : '出站';
-    const item = mqtt ? `第 ${event.index} 条 MQTT 消息` : `第 ${event.index} 段`;
+    const messageTransport = Boolean(metadata?.mqtt || metadata?.http || metadata?.websocket) ||
+      this._config.transport.type === 'udp-server' ||
+      this._config.transport.type === 'udp-client';
+    const item = messageTransport ? `第 ${event.index} 条消息` : `第 ${event.index} 段`;
     const labels: Record<AppliedFault['action'], string> = {
       delay: '延迟',
       drop: '丢弃',
@@ -917,8 +1013,83 @@ export class DeviceRuntime {
       `故障注入 ${event.rule.name}：${direction}${item}，${labels[event.action]}，${event.inputBytes} B → ${event.outputBytes} B`,
       event.connectionId,
     );
-    if (mqtt) traffic.mqtt = mqtt;
+    if (metadata?.mqtt) traffic.mqtt = metadata.mqtt;
+    if (metadata?.http) traffic.http = this.safeHttpMetadata(metadata.http);
+    if (metadata?.websocket) traffic.websocket = this.safeWebSocketMetadata(metadata.websocket);
     this.pushTraffic(traffic);
+  }
+
+  private safeHttpMetadata(metadata: HttpRequestMetadata): HttpTrafficMetadata {
+    const query = this.redactHttpFields(metadata.query);
+    const sanitizedUrl = new URL(metadata.url, 'http://deviceforge.invalid');
+    sanitizedUrl.search = '';
+    for (const [key, values] of Object.entries(query)) {
+      for (const value of Array.isArray(values) ? values : [values]) {
+        sanitizedUrl.searchParams.append(key, value);
+      }
+    }
+    return {
+      method: metadata.method,
+      url: `${sanitizedUrl.pathname}${sanitizedUrl.search}`,
+      path: metadata.path,
+      query,
+      headers: this.redactHttpFields(metadata.headers),
+    };
+  }
+
+  private safeWebSocketMetadata(metadata: WebSocketMessageMetadata): WebSocketMessageMetadata {
+    return {
+      ...metadata,
+      path: this.safeRequestUrl(metadata.path),
+      headers: this.redactHttpFields(metadata.headers),
+    };
+  }
+
+  private redactHttpFields(
+    source: Record<string, string | string[]>,
+  ): Record<string, string | string[]> {
+    return Object.fromEntries(Object.entries(source).map(([key, value]) => [
+      key,
+      SENSITIVE_HTTP_FIELDS.test(key) ? '[redacted]' : value,
+    ]));
+  }
+
+  private templateHttpMetadata(metadata: HttpRequestMetadata): HttpRequestMetadata {
+    const withAliases = (source: Record<string, string | string[]>) => {
+      const result = { ...source };
+      for (const [key, value] of Object.entries(source)) {
+        if (key.includes('-')) result[key.replaceAll('-', '_')] = value;
+      }
+      return result;
+    };
+    return {
+      ...metadata,
+      query: withAliases(metadata.query),
+      headers: withAliases(metadata.headers),
+    };
+  }
+
+  private templateWebSocketMetadata(metadata: WebSocketMessageMetadata): WebSocketMessageMetadata {
+    const headers = { ...metadata.headers };
+    for (const [key, value] of Object.entries(metadata.headers)) {
+      if (key.includes('-')) headers[key.replaceAll('-', '_')] = value;
+    }
+    return { ...metadata, headers };
+  }
+
+  private safeRequestUrl(value: string): string {
+    try {
+      const parsed = new URL(value, 'http://deviceforge.invalid');
+      const query = Object.fromEntries(Array.from(parsed.searchParams.entries()).map(([key, item]) => [
+        key,
+        SENSITIVE_HTTP_FIELDS.test(key) ? '[redacted]' : item,
+      ]));
+      parsed.search = '';
+      for (const [key, item] of Object.entries(query)) parsed.searchParams.append(key, item);
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return value.split('?')[0] ?? value;
+    }
   }
 
   private pushTraffic(event: TrafficEvent): void {

@@ -19,7 +19,12 @@ export function matchesFields(
   if (!match) return true;
 
   for (const [key, expected] of Object.entries(match)) {
-    const actual = fields[key];
+    const actual = key in fields
+      ? fields[key]
+      : key.split('.').reduce<unknown>((value, part) => {
+          if (!value || typeof value !== 'object') return undefined;
+          return (value as Record<string, unknown>)[part];
+        }, fields);
 
     if (expected === null) {
       if (actual !== null) return false;

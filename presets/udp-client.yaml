@@ -1,0 +1,16 @@
+id: udp-client
+name: UDP 单目标客户端
+description: 向 UDP Server 预设的 127.0.0.1:19011 手动发送数据报
+transport:
+  type: udp-client
+  host: 127.0.0.1
+  port: 19011
+  localPort: 0
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules: []
+autoStart: false

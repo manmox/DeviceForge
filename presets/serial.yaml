@@ -1,0 +1,26 @@
+id: serial-line
+name: 物理串口行协议
+description: 打开指定物理串口，按 LF 分帧并对每行返回 OK
+transport:
+  type: serial
+  portPath: /dev/ttyUSB0
+  baudRate: 9600
+  dataBits: 8
+  stopBits: 1
+  parity: none
+  flowControl: none
+framing:
+  type: delimiter
+  delimiterFormat: text
+  delimiter: "\n"
+  includeDelimiter: false
+codec:
+  type: raw
+  display: ascii
+state: {}
+rules:
+  - name: 串口返回 OK
+    on: frame
+    send:
+      hex: "4F4B0D0A"
+autoStart: false

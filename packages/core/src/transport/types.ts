@@ -1,17 +1,29 @@
 import type { TransportConfig } from '../schema/device';
 import type { MqttQos } from '../schema/device';
-import type { ConnectionInfo, MqttMessageMetadata, TransportStatus } from '../types';
+import type {
+  ConnectionInfo,
+  HttpRequestMetadata,
+  TransportMessageMetadata,
+  TransportStatus,
+} from '../types';
 
 export interface TransportSendOptions {
   topic?: string;
   qos?: MqttQos;
+  http?: {
+    requestId: string;
+    statusCode?: number;
+    headers?: Record<string, string>;
+    request?: HttpRequestMetadata;
+  };
+  websocket?: { isBinary?: boolean; metadata?: import('../types').WebSocketMessageMetadata };
 }
 
 export interface TransportEvents {
   onData(
     connectionId: string,
     data: Buffer,
-    metadata?: MqttMessageMetadata,
+    metadata?: TransportMessageMetadata,
   ): void;
   onConnect(connection: ConnectionInfo): void;
   onDisconnect(connectionId: string): void;
@@ -33,4 +45,9 @@ export interface TransportAdapter {
   endpoints(): string[];
   lastConnectionId(): string | undefined;
   status(): TransportStatus;
+  finishRequest?(
+    connectionId: string,
+    metadata: HttpRequestMetadata,
+    statusCode?: number,
+  ): Promise<void>;
 }

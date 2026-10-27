@@ -50,7 +50,7 @@ class FakeTransport implements TransportAdapter {
   }
 
   receive(data: Buffer, metadata?: MqttMessageMetadata): void {
-    this.events?.onData(this.connection.id, data, metadata);
+    this.events?.onData(this.connection.id, data, metadata ? { mqtt: metadata } : undefined);
   }
 
   connections(): ConnectionInfo[] {

@@ -11,6 +11,42 @@ export const MqttMessageMetadataSchema = z.object({
 
 export type MqttMessageMetadata = z.infer<typeof MqttMessageMetadataSchema>;
 
+const HttpValueSchema = z.union([z.string(), z.array(z.string())]);
+
+export const HttpRequestMetadataSchema = z.object({
+  requestId: z.string(),
+  method: z.string(),
+  url: z.string(),
+  path: z.string(),
+  query: z.record(z.string(), HttpValueSchema),
+  headers: z.record(z.string(), HttpValueSchema),
+  body: z.string().optional(),
+  bodyBase64: z.string().optional(),
+});
+
+export type HttpRequestMetadata = z.infer<typeof HttpRequestMetadataSchema>;
+export const HttpTrafficMetadataSchema = HttpRequestMetadataSchema.omit({ requestId: true });
+export type HttpTrafficMetadata = z.infer<typeof HttpTrafficMetadataSchema>;
+export const HttpResponseTrafficMetadataSchema = z.object({
+  statusCode: z.number().int(),
+  headers: z.record(z.string(), HttpValueSchema),
+});
+export type HttpResponseTrafficMetadata = z.infer<typeof HttpResponseTrafficMetadataSchema>;
+
+export const WebSocketMessageMetadataSchema = z.object({
+  path: z.string(),
+  isBinary: z.boolean(),
+  headers: z.record(z.string(), HttpValueSchema),
+});
+
+export type WebSocketMessageMetadata = z.infer<typeof WebSocketMessageMetadataSchema>;
+
+export interface TransportMessageMetadata {
+  mqtt?: MqttMessageMetadata;
+  http?: HttpRequestMetadata;
+  websocket?: WebSocketMessageMetadata;
+}
+
 export const ConnectionInfoSchema = z.object({
   id: z.string(),
   remoteAddress: z.string().optional(),
@@ -45,6 +81,9 @@ export const TrafficEventSchema = z.object({
   note: z.string().optional(),
   error: z.string().optional(),
   mqtt: MqttMessageMetadataSchema.optional(),
+  http: HttpTrafficMetadataSchema.optional(),
+  httpResponse: HttpResponseTrafficMetadataSchema.optional(),
+  websocket: WebSocketMessageMetadataSchema.optional(),
 });
 
 export type TrafficEvent = z.infer<typeof TrafficEventSchema>;

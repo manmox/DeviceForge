@@ -1,0 +1,19 @@
+id: udp-echo
+name: UDP 数据报响应
+description: 每个 UDP 来源端点独立显示，收到任意数据报后向该来源返回 OK
+transport:
+  type: udp-server
+  host: 127.0.0.1
+  port: 19011
+framing:
+  type: raw
+codec:
+  type: raw
+  display: hex
+state: {}
+rules:
+  - name: 返回 OK
+    on: frame
+    send:
+      hex: "4F4B"
+autoStart: false
