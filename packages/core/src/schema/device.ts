@@ -203,6 +203,63 @@ export const MqttBrokerTransportSchema = z
     }
   });
 
+const ModbusAddressKeySchema = z
+  .string()
+  .regex(/^(0|[1-9]\d*)$/, 'Modbus 地址必须是十进制零基地址')
+  .refine((value) => Number(value) <= 65_535, 'Modbus 地址必须在 0–65535 之间');
+
+const ModbusCoilMapSchema = z.record(ModbusAddressKeySchema, z.boolean());
+const ModbusRegisterMapSchema = z.record(
+  ModbusAddressKeySchema,
+  z.number().int().min(0).max(65_535),
+);
+
+export const ModbusTablesSchema = z.object({
+  coils: ModbusCoilMapSchema.default({}),
+  discreteInputs: ModbusCoilMapSchema.default({}),
+  holdingRegisters: ModbusRegisterMapSchema.default({}),
+  inputRegisters: ModbusRegisterMapSchema.default({}),
+});
+
+const ModbusUnitIdSchema = z.number().int().min(1).max(247).default(1);
+
+export const ModbusTcpTransportSchema = z.object({
+  type: z.literal('modbus-tcp'),
+  host: HostSchema,
+  port: PortSchema.default(1502),
+  unitId: ModbusUnitIdSchema,
+  tables: ModbusTablesSchema.default({
+    coils: {},
+    discreteInputs: {},
+    holdingRegisters: {},
+    inputRegisters: {},
+  }),
+});
+
+const ModbusSerialSchema = z.discriminatedUnion('type', [
+  SerialTransportSchema,
+  VirtualSerialTransportSchema,
+]);
+
+export const ModbusRtuTransportSchema = z.object({
+  type: z.literal('modbus-rtu'),
+  serial: ModbusSerialSchema.default({
+    type: 'virtual-serial',
+    baudRate: 9_600,
+    dataBits: 8,
+    stopBits: 1,
+    parity: 'none',
+    flowControl: 'none',
+  }),
+  unitId: ModbusUnitIdSchema,
+  tables: ModbusTablesSchema.default({
+    coils: {},
+    discreteInputs: {},
+    holdingRegisters: {},
+    inputRegisters: {},
+  }),
+});
+
 export const TransportSchema = z.discriminatedUnion('type', [
   TcpServerTransportSchema,
   TcpClientTransportSchema,
@@ -214,6 +271,8 @@ export const TransportSchema = z.discriminatedUnion('type', [
   WebSocketServerTransportSchema,
   MqttClientTransportSchema,
   MqttBrokerTransportSchema,
+  ModbusTcpTransportSchema,
+  ModbusRtuTransportSchema,
 ]);
 
 export const LengthFieldSchema = z.object({
@@ -1051,6 +1110,39 @@ export const DeviceConfigSchema = z.object({
   }),
   autoStart: z.boolean().default(false),
 }).superRefine((config, ctx) => {
+  const isModbus = config.transport.type === 'modbus-tcp' ||
+    config.transport.type === 'modbus-rtu';
+  if (isModbus) {
+    if (config.framing.type !== 'raw') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transport'],
+        message: 'Modbus 使用协议帧边界，不能配置通用分帧方式',
+      });
+    }
+    if (config.codec.type !== 'raw') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transport'],
+        message: 'Modbus 使用内置协议编解码，不能配置通用编解码器',
+      });
+    }
+    if (config.rules.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transport'],
+        message: 'Modbus 请求由线圈与寄存器表处理，不支持通用规则',
+      });
+    }
+    if (config.state.modbus !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['state', 'modbus'],
+        message: 'state.modbus 由 Modbus 运行时数据表保留',
+      });
+    }
+  }
+
   const isMqtt =
     config.transport.type === 'mqtt-client' ||
     config.transport.type === 'mqtt-broker';
@@ -1123,6 +1215,9 @@ export type HttpServerTransport = z.infer<typeof HttpServerTransportSchema>;
 export type WebSocketServerTransport = z.infer<typeof WebSocketServerTransportSchema>;
 export type MqttClientTransport = z.infer<typeof MqttClientTransportSchema>;
 export type MqttBrokerTransport = z.infer<typeof MqttBrokerTransportSchema>;
+export type ModbusTcpTransport = z.infer<typeof ModbusTcpTransportSchema>;
+export type ModbusRtuTransport = z.infer<typeof ModbusRtuTransportSchema>;
+export type ModbusTables = z.infer<typeof ModbusTablesSchema>;
 export type MqttSubscription = z.infer<typeof MqttSubscriptionSchema>;
 export type MqttQos = z.infer<typeof MqttQosSchema>;
 export type ReconnectConfig = z.infer<typeof ReconnectConfigSchema>;

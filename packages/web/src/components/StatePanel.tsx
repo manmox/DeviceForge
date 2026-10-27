@@ -1,5 +1,5 @@
 import { Activity, Braces, Check, Clock, Loader2, RotateCcw, Save } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useJsonDraft } from '../hooks/useJsonDraft';
 import { formatBytes, formatUptime } from '../lib/format';
 import {
@@ -16,9 +16,18 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
   const saveState = useAppStore((state) => state.saveState);
   const showToast = useAppStore((state) => state.showToast);
 
-  const stateJson = JSON.stringify(device.state, null, 2);
-  const draft = useJsonDraft(device.state, 'state', {
-    baseline: device.state,
+  const isModbus = device.config.transport.type === 'modbus-tcp' || device.config.transport.type === 'modbus-rtu';
+  const editableState = useMemo(() => {
+    if (!isModbus || !Object.hasOwn(device.state, 'modbus')) return device.state;
+    const { modbus: _modbus, ...state } = device.state;
+    return state;
+  }, [device.state, isModbus]);
+  const liveModbusTables = isModbus && device.state.modbus && typeof device.state.modbus === 'object'
+    ? device.state.modbus as Record<string, Record<string, boolean | number>>
+    : undefined;
+  const stateJson = JSON.stringify(editableState, null, 2);
+  const draft = useJsonDraft(editableState, 'state', {
+    baseline: editableState,
     baselineKey: stateJson,
     noun: '状态',
   });
@@ -32,9 +41,9 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
     if (deviceIdRef.current === device.config.id) return;
     deviceIdRef.current = device.config.id;
     lastLiveRef.current = stateJson;
-    draft.load(device.state);
+    draft.load(editableState);
     setLiveChanged(false);
-  }, [device.config.id, device.state, stateJson, draft.load]);
+  }, [device.config.id, editableState, stateJson, draft.load]);
 
   useEffect(() => {
     if (lastLiveRef.current === stateJson) return;
@@ -201,6 +210,8 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
             })}
           </div>
 
+          {liveModbusTables && <ModbusTablesSnapshot tables={liveModbusTables} />}
+
           <div className="panel px-3 py-3">
             <div className="text-[10.5px] text-mist-500">
               {presentation.endpointLabel}
@@ -219,6 +230,47 @@ export function StatePanel({ device }: { device: DeviceDetail }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ModbusTablesSnapshot({ tables }: { tables: Record<string, Record<string, boolean | number>> }) {
+  const names = [
+    ['coils', '线圈（可读写）'],
+    ['discreteInputs', '离散输入'],
+    ['holdingRegisters', '保持寄存器（可读写）'],
+    ['inputRegisters', '输入寄存器'],
+  ] as const;
+
+  return (
+    <div className="panel px-3 py-3">
+      <div className="text-[10.5px] font-medium text-mist-300">Modbus 实时数据表</div>
+      <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">
+        {names.map(([key, label]) => {
+          const entries = Object.entries(tables[key] ?? {}).sort(([a], [b]) => Number(a) - Number(b));
+          return (
+            <section key={key}>
+              <div className="mb-1 flex items-center justify-between text-[10px] text-mist-500">
+                <span>{label}</span>
+                <span>{entries.length} 项</span>
+              </div>
+              {entries.length === 0 ? (
+                <div className="rounded-md border border-white/5 px-2 py-1 font-mono text-[10px] text-mist-600">空</div>
+              ) : (
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                  {entries.map(([address, value]) => (
+                    <div key={address} className="flex items-center justify-between gap-2 rounded-md border border-white/5 bg-white/[0.02] px-2 py-1 font-mono text-[10px]">
+                      <span className="text-mist-500">{address}</span>
+                      <span className="text-mist-200">{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[10px] leading-4 text-mist-600">协议读写会更新表值；重启设备后恢复配置初值。</p>
     </div>
   );
 }

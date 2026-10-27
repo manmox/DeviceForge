@@ -53,6 +53,8 @@ export const TRANSPORT_OPTIONS: {
   { value: 'virtual-serial', label: 'Virtual Serial · 虚拟串口', description: '用 socat 创建 PTY 对，供模拟器和串口工具互通。' },
   { value: 'http-server', label: 'HTTP Server · 请求响应', description: '按 HTTP 请求规则返回状态码、响应头和响应体。' },
   { value: 'websocket-server', label: 'WebSocket Server · 消息服务', description: '接收多个客户端的文本或二进制消息。' },
+  { value: 'modbus-tcp', label: 'Modbus TCP · 从站', description: '通过 Modbus TCP 提供线圈与寄存器读写。' },
+  { value: 'modbus-rtu', label: 'Modbus RTU · 串口从站', description: '通过物理串口或虚拟 PTY 提供 Modbus RTU 服务。' },
 ];
 
 const PRESENTATIONS: Record<TransportConfig['type'], TransportPresentation> = {
@@ -182,6 +184,22 @@ const PRESENTATIONS: Record<TransportConfig['type'], TransportPresentation> = {
     trafficEmptyHint: 'WebSocket 消息边界作为帧边界，规则响应会发回同一客户端。',
     copyEndpointTitle: '复制 WebSocket 地址', disconnectHint: '关闭该 WebSocket 客户端。', isOutbound: false,
   },
+  'modbus-tcp': {
+    kindLabel: 'Modbus TCP', modeLabel: 'Modbus TCP 从站', endpointLabel: '监听地址', endpointShortLabel: 'Modbus TCP',
+    peerLabel: '主站客户端', connectionTitle: 'Modbus 主站连接', connectionStatLabel: '主站连接', connectionUnit: '个连接',
+    sendTargetLabel: '协议自动响应', waitingLabel: '等待 Modbus 主站', pausedLabel: 'Modbus TCP 从站已停止',
+    emptyConnectionText: (endpoint) => `让 Modbus 主站连接 ${endpoint}，读写请求和从站响应会显示在流量面板。`,
+    trafficEmptyHint: '每条 Modbus TCP 请求都会由线圈与寄存器表处理并返回协议响应。',
+    copyEndpointTitle: '复制 Modbus TCP 地址', disconnectHint: '断开该 Modbus 主站连接。', isOutbound: false,
+  },
+  'modbus-rtu': {
+    kindLabel: 'Modbus RTU', modeLabel: 'Modbus RTU 从站', endpointLabel: '串口端点', endpointShortLabel: 'RTU',
+    peerLabel: '主站串口', connectionTitle: 'Modbus RTU 串口', connectionStatLabel: '串口连接', connectionUnit: '个串口',
+    sendTargetLabel: '协议自动响应', waitingLabel: '等待串口打开', pausedLabel: 'Modbus RTU 从站已停止',
+    emptyConnectionText: () => '启动设备后连接物理串口或虚拟 PTY 主站端，Modbus RTU 请求会显示在流量面板。',
+    trafficEmptyHint: '有效 RTU 请求会校验 CRC，再由线圈与寄存器表处理。',
+    copyEndpointTitle: '复制 Modbus RTU 端点', disconnectHint: '关闭 Modbus RTU 串口。', isOutbound: false,
+  },
 };
 
 export function transportPresentation(
@@ -221,6 +239,10 @@ export function transportEndpoint(
     }
     case 'serial': return config.portPath;
     case 'virtual-serial': return '启动后由 socat 分配';
+    case 'modbus-rtu':
+      return config.serial.type === 'serial' ? config.serial.portPath : '启动后由 socat 分配';
+    case 'modbus-tcp':
+      return config.port === 0 ? `${formatHost(config.host)}:自动分配` : formatHostPort(config.host, config.port);
     case 'websocket-server': return `ws://${formatHostPort(config.host, config.port)}${config.path}`;
     case 'http-server': return `http://${formatHostPort(config.host, config.port)}`;
     case 'tcp-server':

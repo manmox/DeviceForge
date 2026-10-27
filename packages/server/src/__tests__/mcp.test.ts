@@ -116,6 +116,10 @@ function capabilities(root: string, calls: string[] = []): McpCapabilities {
         return true;
       },
     },
+    modbus: {
+      read: async () => { throw new Error('设备 sim-a 不是 Modbus 从站'); },
+      write: async () => { throw new Error('设备 sim-a 不是 Modbus 从站'); },
+    },
   };
 }
 
@@ -143,6 +147,8 @@ describe('DeviceForge MCP HTTP 服务', () => {
       expect(names).toContain('project_list_files');
       expect(names).toContain('devices_create_from_yaml');
       expect(names).toContain('runtime_send');
+      expect(names).toContain('modbus_read');
+      expect(names).toContain('modbus_write');
       expect(names).toContain('traffic_query');
       expect(names).toContain('fault_injection_get');
       expect(names).toContain('fault_injection_update_rules');

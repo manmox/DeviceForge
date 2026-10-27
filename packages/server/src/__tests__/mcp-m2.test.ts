@@ -190,17 +190,18 @@ afterEach(async () => {
   }
 });
 
-describe('MCP M2 真实调用链', () => {
+describe('MCP M2/M3 真实调用链', () => {
   it('校验、创建并读取全部新增传输配置，返回配置错误', async () => {
     const harness = await createHarness();
     const presets = await call<{
       presets: Array<{ config: { transport: { type: string } } }>;
     }>(harness.client, 'devices_list_presets');
-    expect(presets.presets).toHaveLength(12);
+    expect(presets.presets).toHaveLength(14);
     expect(new Set(presets.presets.map((preset) => preset.config.transport.type))).toEqual(new Set([
       'tcp-server', 'tcp-client', 'mqtt-client', 'mqtt-broker',
       'udp-server', 'udp-client', 'serial', 'virtual-serial',
       'http-server', 'websocket-server',
+      'modbus-tcp', 'modbus-rtu',
     ]));
 
     const configs = [
@@ -210,6 +211,8 @@ describe('MCP M2 真实调用链', () => {
       { id: 'mcp-virtual-serial', name: 'MCP Virtual Serial', transport: { type: 'virtual-serial' } },
       { id: 'mcp-http-server', name: 'MCP HTTP Server', transport: { type: 'http-server', host: '127.0.0.1', port: 0 } },
       { id: 'mcp-websocket-server', name: 'MCP WebSocket Server', transport: { type: 'websocket-server', host: '127.0.0.1', port: 0, path: '/mcp' } },
+      { id: 'mcp-modbus-tcp', name: 'MCP Modbus TCP', transport: { type: 'modbus-tcp', host: '127.0.0.1', port: 0, unitId: 1, tables: { coils: { '0': false }, holdingRegisters: { '0': 17 } } } },
+      { id: 'mcp-modbus-rtu', name: 'MCP Modbus RTU', transport: { type: 'modbus-rtu', unitId: 1, serial: { type: 'virtual-serial' }, tables: { coils: { '0': false }, holdingRegisters: { '0': 17 } } } },
     ];
 
     for (const config of configs) {
@@ -487,5 +490,112 @@ describe('MCP M2 真实调用链', () => {
     const stopped = await call<DeviceOutput>(harness.client, 'devices_get', { id: config.id });
     expect(stopped.device.status.state).toBe('stopped');
     expect(stopped.device.status.endpoints).toEqual([]);
+  });
+
+  it('经真实 MCP Client 调用 Modbus TCP 主站读写，并查询状态、流量和录制', async () => {
+    const harness = await createHarness();
+    const config = {
+      id: 'mcp-modbus-tcp-roundtrip',
+      name: 'MCP Modbus TCP roundtrip',
+      transport: {
+        type: 'modbus-tcp', host: '127.0.0.1', port: 0, unitId: 9,
+        tables: {
+          coils: { '0': false, '1': true },
+          discreteInputs: { '0': true },
+          holdingRegisters: { '0': 12, '1': 34 },
+          inputRegisters: { '0': 56 },
+        },
+      },
+    };
+    const yamlConfig = yaml(config);
+    expect((await call<{ valid: boolean }>(harness.client, 'devices_validate_config', { yaml: yamlConfig })).valid)
+      .toBe(true);
+    await call(harness.client, 'devices_create_from_yaml', { yaml: yamlConfig });
+    const started = await call<RuntimeStatusOutput>(harness.client, 'runtime_start', { id: config.id });
+    expect(started.status.state).toBe('running');
+
+    const recording = await call<{ session: { id: string } }>(harness.client, 'recordings_start', { id: config.id });
+    const readCoils = await call<{
+      mode: string; functionCode: number; values: boolean[]; responseHex: string;
+    }>(harness.client, 'modbus_read', {
+      id: config.id, table: 'coils', address: 0, quantity: 2,
+    });
+    expect(readCoils).toMatchObject({ mode: 'tcp', functionCode: 1, values: [false, true] });
+    expect(readCoils.responseHex).toBeDefined();
+
+    const write = await call<{ functionCode: number; values: number[] }>(harness.client, 'modbus_write', {
+      id: config.id, table: 'holdingRegisters', address: 0, values: [321, 654],
+    });
+    expect(write).toMatchObject({ functionCode: 16, values: [321, 654] });
+    const readBack = await call<{ values: number[] }>(harness.client, 'modbus_read', {
+      id: config.id, table: 'holdingRegisters', address: 0, quantity: 2,
+    });
+    expect(readBack.values).toEqual([321, 654]);
+
+    const exception = await call<{ exceptionCode?: number; values: unknown[] }>(harness.client, 'modbus_read', {
+      id: config.id, table: 'inputRegisters', address: 1, quantity: 1,
+    });
+    expect(exception).toMatchObject({ exceptionCode: 2, values: [] });
+    await expectToolError(harness.client, 'runtime_send', {
+      id: config.id, message: { hex: '010300000001' }, target: 'last',
+    });
+    await expectToolError(harness.client, 'modbus_read', {
+      id: config.id, table: 'holdingRegisters', address: 0, quantity: 1, host: '127.0.0.1', port: 502,
+    });
+    await expectToolError(harness.client, 'modbus_write', {
+      id: config.id, table: 'coils', address: 0, values: [true], broadcast: true,
+    });
+
+    const device = await call<DeviceOutput>(harness.client, 'devices_get', { id: config.id });
+    expect(device.state.modbus).toMatchObject({ holdingRegisters: { '0': 321, '1': 654 } });
+    const traffic = await queryTraffic(harness.client, config.id);
+    expect(traffic.events.some((event) => event.modbus?.functionCode === 16 && event.direction === 'in')).toBe(true);
+    expect(traffic.events.some((event) => event.modbus?.exceptionCode === 2)).toBe(true);
+
+    await call(harness.client, 'recordings_stop', { id: config.id, recordingId: recording.session.id });
+    const recorded = await call<{ total: number; events: Array<{ event: TrafficEvent }> }>(
+      harness.client, 'recordings_read_events', { id: config.id, recordingId: recording.session.id },
+    );
+    expect(recorded.total).toBeGreaterThanOrEqual(5);
+    expect(recorded.events.some((event) => event.event.modbus?.table === 'holdingRegisters')).toBe(true);
+    await call(harness.client, 'runtime_stop', { id: config.id });
+  });
+
+  it.skipIf(!socatAvailable)('经真实 MCP Client 通过虚拟 RTU PTY 执行协议读写', async () => {
+    const harness = await createHarness();
+    const config = {
+      id: 'mcp-modbus-rtu-roundtrip',
+      name: 'MCP Modbus RTU roundtrip',
+      transport: {
+        type: 'modbus-rtu', unitId: 7,
+        serial: { type: 'virtual-serial', baudRate: 9_600, dataBits: 8, stopBits: 1, parity: 'none' },
+        tables: { coils: { '0': false }, holdingRegisters: { '0': 23, '1': 24 } },
+      },
+    };
+    await call(harness.client, 'devices_create_from_yaml', { yaml: yaml(config) });
+    const started = await call<RuntimeStatusOutput>(harness.client, 'runtime_start', { id: config.id });
+    expect(started.status.endpoints).toHaveLength(2);
+    const read = await call<{ mode: string; functionCode: number; values: number[] }>(
+      harness.client, 'modbus_read', { id: config.id, table: 'holdingRegisters', address: 0, quantity: 2 },
+    );
+    expect(read).toMatchObject({ mode: 'rtu', functionCode: 3, values: [23, 24] });
+    const write = await call<{ functionCode: number }>(harness.client, 'modbus_write', {
+      id: config.id, table: 'coils', address: 0, values: [true],
+    });
+    expect(write.functionCode).toBe(5);
+    const updated = await call<{ values: boolean[] }>(harness.client, 'modbus_read', {
+      id: config.id, table: 'coils', address: 0, quantity: 1,
+    });
+    expect(updated.values).toEqual([true]);
+    const broadcast = await call<{ broadcast?: boolean; unitId: number; responseHex?: string }>(harness.client, 'modbus_write', {
+      id: config.id, table: 'holdingRegisters', address: 1, values: [99], broadcast: true,
+    });
+    expect(broadcast).toMatchObject({ broadcast: true, unitId: 0 });
+    expect(broadcast.responseHex).toBeUndefined();
+    const broadcastUpdated = await call<{ values: number[] }>(harness.client, 'modbus_read', {
+      id: config.id, table: 'holdingRegisters', address: 1, quantity: 1,
+    });
+    expect(broadcastUpdated.values).toEqual([99]);
+    await call(harness.client, 'runtime_stop', { id: config.id });
   });
 });

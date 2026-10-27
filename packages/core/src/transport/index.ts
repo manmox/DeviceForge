@@ -7,6 +7,8 @@ import { UdpClientTransportAdapter, UdpServerTransportAdapter } from './udp';
 import { SerialTransportAdapter } from './serial';
 import { HttpServerTransportAdapter } from './http-server';
 import { WebSocketServerTransportAdapter } from './websocket-server';
+import { ModbusTcpTransportAdapter } from './modbus-tcp';
+import { ModbusRtuTransportAdapter } from './modbus-rtu';
 import type { TransportAdapter } from './types';
 
 export function createTransport(
@@ -33,5 +35,9 @@ export function createTransport(
       return new MqttClientTransportAdapter(config, deviceId);
     case 'mqtt-broker':
       return new MqttBrokerTransportAdapter(config);
+    case 'modbus-tcp':
+      return new ModbusTcpTransportAdapter(config);
+    case 'modbus-rtu':
+      return new ModbusRtuTransportAdapter(config);
   }
 }

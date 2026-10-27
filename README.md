@@ -2,7 +2,7 @@
 
 本地运行的物联网设备仿真工作台。用配置描述设备行为，在本机端口模拟硬件，让上位机照常连接——设备掉线、内网穿透中断时，联调仍然可以继续。
 
-> **当前版本 v0.1**：支持 TCP、UDP、物理与虚拟串口、MQTT、HTTP Server 和 WebSocket Server，并提供声明式编解码、规则引擎、故障注入、流量录制回看和实时报文控制台。Modbus 仍在路线图中。
+> **当前版本 v0.1**：支持 TCP、UDP、物理与虚拟串口、MQTT、HTTP Server、WebSocket Server 和 Modbus TCP/RTU 从站，并提供声明式编解码、规则引擎、故障注入、流量录制回看和实时报文控制台。
 
 ## 为什么做这个
 
@@ -23,6 +23,8 @@
 - 物理串口和虚拟串口（Linux/macOS；虚拟串口由 `socat` 管理 PTY 对）
 - HTTP Server（HTTP/1.1 请求进入规则，响应可配置状态码、响应头和响应体）
 - WebSocket Server（多个客户端，分别处理文本和二进制消息）
+- Modbus TCP/RTU 从站（FC 01/02/03/04/05/06/15/16、稀疏线圈与寄存器表、标准异常响应）
+- MCP Modbus 主站工具（按设备 ID 对运行中的 TCP/虚拟 RTU 从站执行读写）
 - 设备运行状态与传输状态分离（连接中/已连接/重连中/已断开/错误）
 - 分帧：`raw`、`delimiter`、`length-prefix`、`fixed`
 - 编解码：`raw`（hex/ascii）、声明式 `fields` 和通用文本协议 `text`（报文变体、可选/重复字段、全局数据字典、ACK 重传、数组字段编码）
@@ -36,7 +38,7 @@
 - Web 控制台：设备列表、可视化表单 / YAML 双模式配置、实时报文、hex dump、解码字段、手动发送、连接管理、状态查看、全局数据字典管理
 - 配置持久化到 `data/devices.json`，本机自定义字典持久化到 `data/dictionaries.json`；报文和运行时状态保存在内存
 - 录制会话以追加式文件保存在 Git 忽略目录 `data/recordings/`，由用户手动删除
-- 内置 12 个预设，覆盖 TCP、UDP、MQTT、物理与虚拟串口、HTTP 和 WebSocket
+- 内置 14 个预设，覆盖 TCP、UDP、MQTT、物理与虚拟串口、HTTP、WebSocket 和 Modbus
 
 ## 快速开始
 
@@ -70,7 +72,8 @@ pnpm start
 
 - **项目文件**：`project_list_files`、`project_search_files`、`project_read_file`。路径以仓库根目录为边界；可读取仓库内所有文件，包括 Git 忽略的 `data/` 文件。越界路径和指向仓库外的符号链接会被拒绝。
 - **设备配置**：`devices_list`、`devices_get`、`devices_list_presets`、`devices_validate_config`、`devices_create_from_yaml`、`devices_update_from_yaml`。配置创建和更新共用 REST API 的校验及字典迁移规则；创建设备后不会自动启动，更新运行中的设备会被拒绝。
-- **设备运行**：`runtime_start`、`runtime_stop`、`runtime_restart`、`runtime_send`、`runtime_disconnect`。
+- **设备运行**：`runtime_start`、`runtime_stop`、`runtime_restart`、`runtime_send`、`runtime_disconnect`。Modbus 从站拒绝 `runtime_send`，协议读写应调用专用工具。
+- **Modbus 主站**：`modbus_read` 按零基地址读取线圈或寄存器；`modbus_write` 写线圈或保持寄存器。工具只接受 DeviceForge 设备 ID，连接运行中的 Modbus TCP 或虚拟 RTU 端点；物理 RTU 由外部主站访问。
 - **流量记录**：`traffic_query`，可按方向和起始时间筛选内存中的收发及系统事件。
 - **故障注入**：`fault_injection_get` 查询规则和启用状态，`fault_injection_update_rules` 校验并热更新规则，`fault_injection_set_enabled` 在设备运行时启停注入。规则沿用设备配置中的故障注入 schema，停止设备或重启服务后默认关闭。
 - **录制回放**：`recordings_list`、`recordings_start`、`recordings_stop`、`recordings_read_events` 和 `recordings_delete`。事件读取使用 `offset`/`limit` 分页，默认 200 条、最多 1000 条，返回相对时间偏移及完整收发事件。读取只查看历史数据，不会向设备重发报文或重新执行故障规则；删除仅允许已停止的会话。
@@ -184,7 +187,7 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 
 ### 传输方式
 
-`transport.type` 支持 `tcp-server`、`tcp-client`、`udp-server`、`udp-client`、`serial`、`virtual-serial`、`http-server`、`websocket-server`、`mqtt-client` 和 `mqtt-broker`：
+`transport.type` 支持 `tcp-server`、`tcp-client`、`udp-server`、`udp-client`、`serial`、`virtual-serial`、`http-server`、`websocket-server`、`mqtt-client`、`mqtt-broker`、`modbus-tcp` 和 `modbus-rtu`：
 
 - **`tcp-server`**：设备监听 `host:port`，可接受多个上位机连接。`port: 0` 表示自动分配，实际端口以运行状态中的端点为准。
 - **`tcp-client`**：设备主动连接一个上游 `host:port`，用于模拟设备上报或网关连接。启动时不会等待上游可用；连接失败后按配置自动重连。
@@ -196,8 +199,12 @@ magic | 总长  | cmd | seq  | temp  | 湿度 | 低字节在前
 - **`virtual-serial`**：启动 `socat` 创建一对临时 PTY。运行状态会展示设备端和工具端路径；停止设备时结束子进程并清理 PTY。仅支持 Linux/macOS。
 - **`http-server`**：监听独立 HTTP 端口，每个 HTTP 请求体作为一条消息。规则可匹配 `http.method`、`http.path`、`http.query.*` 和 `http.headers.*`，也可读取 `http.body` 与 `http.bodyBase64`。HTTP 规则的 `send` 定义响应体，`httpResponse` 定义状态码与响应头；每个请求只返回一条响应，首条成功发送的规则负责响应。
 - **`websocket-server`**：监听指定路径，支持多个并发客户端。每条 WebSocket 消息作为一条消息进入规则；回复发回相同连接，并沿用该客户端最近一条消息的文本或二进制类型。
+- **`modbus-tcp`**：Modbus TCP 从站，默认监听 `127.0.0.1:1502`。每台设备配置一个 Unit ID 和四张稀疏地址表。MBAP 长度字段负责分帧，支持多客户端及分片、粘连报文。
+- **`modbus-rtu`**：Modbus RTU 从站，可连接物理串口或用 `socat` 创建虚拟 PTY 对，默认 9600、8N1。RTU 使用 CRC16/MODBUS 校验和串口帧间隔分帧；广播写入会更新数据表但不回复。
 
-新增网络服务默认绑定 `127.0.0.1`。HTTP 和 WebSocket 的模拟服务端口独立于控制面。M2 不提供这些服务的 TLS 或认证；物理串口验收以 Linux/macOS 为准，Windows 串口支持后续加入。
+Modbus 数据表为 `coils`、`discreteInputs`、`holdingRegisters` 和 `inputRegisters`。键是十进制零基地址，布尔表存布尔值，寄存器表存 0–65535 的整数。读取或写入范围必须完整存在于对应表中，否则从站返回非法数据地址。写操作只更新运行时数据，设备重启后恢复 YAML 初值。Modbus 使用内置数据表处理请求，不运行通用 codec、framing 或帧规则。
+
+新增网络服务默认绑定 `127.0.0.1`。HTTP、WebSocket 和 Modbus TCP 的模拟服务端口独立于控制面。模拟服务不提供 TLS 或认证；物理串口和虚拟串口首轮支持 Linux/macOS，Windows 串口支持后续加入。
 
 UDP Server 示例：
 
@@ -281,6 +288,39 @@ transport:
   parity: none
   flowControl: none
 ```
+
+Modbus TCP 示例：
+
+```yaml
+transport:
+  type: modbus-tcp
+  host: 127.0.0.1
+  port: 1502
+  unitId: 1
+  tables:
+    coils: { "0": false, "1": true }
+    discreteInputs: { "0": true }
+    holdingRegisters: { "0": 100, "1": 200 }
+    inputRegisters: { "0": 42 }
+```
+
+Modbus RTU 以 `serial` 或 `virtual-serial` 配置串口，数据表与 TCP 相同：
+
+```yaml
+transport:
+  type: modbus-rtu
+  unitId: 1
+  serial:
+    type: virtual-serial
+    baudRate: 9600
+    dataBits: 8
+    stopBits: 1
+    parity: none
+  tables:
+    holdingRegisters: { "0": 100 }
+```
+
+Modbus 支持功能码 01/02/03/04 读取线圈和寄存器，05/06 写单值，15/16 写多个值。线圈最多读 2000、写 1968 个；寄存器最多读 125、写 123 个。异常码 01 表示非法功能，02 表示非法地址，03 表示非法值或数量，04 表示从站内部处理失败。RTU 广播地址 0 只执行写操作且不返回响应，CRC 错误和不匹配的从站地址不响应。MCP `modbus_read`、`modbus_write` 可对运行中的 TCP 和虚拟 RTU 设备发送真实主站请求；实体串口仅能由外部主站访问。控制台展示当前表值和协议流量，不提供 Modbus 原始手动发送。
 
 端到端联调可使用以下方式：`curl -i http://127.0.0.1:19080/health`；`websocat ws://127.0.0.1:19081/ws`；UDP 可用 `nc -u 127.0.0.1 19011`；虚拟串口启动后，将串口工具连接到状态中的工具端 PTY 路径。UDP 的请求与响应必须由同一来源端点收发；WebSocket 客户端上下文互相独立。
 
@@ -659,6 +699,7 @@ pnpm start           # 生产模式（需要先 build）
 - TCP Client 设备运行时集成：重连后重新执行 `on: connect`、断线发送报错、设备状态保持 `running`
 - MQTT Client 与内嵌 Broker：QoS 0/1 收发、共享认证、TLS 文件错误、重连、多客户端、主题规则过滤与覆盖、应用层 ACK 重试
 - M2 传输：UDP 多来源回复与单目标客户端、虚拟串口 PTY 与流分帧、HTTP 请求匹配/状态码/响应头/响应体、WebSocket 多客户端文本和二进制消息、配置 API 启停和全传输预设校验
+- M3 Modbus：八种功能码、异常响应、CRC/广播处理、动态 TCP 端口分片与粘连、真实 MCP Streamable HTTP 读写、虚拟 RTU PTY 调用链和流量录制
 - 设备信息 `deviceInfo` 的 schema 解析和 Web 端元数据归一化/摘要
 - Web 端配置默认值、传输展示/状态文案、YAML/JSON 序列化、JSON 值编辑、规则触发/send/match 转换的纯函数测试
 
@@ -681,13 +722,14 @@ pnpm start           # 生产模式（需要先 build）
 | 里程碑 | 内容 |
 | --- | --- |
 | **M2 传输扩展（已完成）** | TCP Server / TCP Client / MQTT Broker / MQTT Client / UDP Server / UDP Client / 物理串口 / 虚拟串口（Linux/macOS socat）/ HTTP Server / WebSocket Server；Windows 串口适配另行安排 |
-| **M3 Modbus（暂缓）** | Modbus TCP/RTU slave，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应 |
+| **M3 Modbus（已实现）** | Modbus TCP/RTU 从站，FC 01/02/03/04/05/06/15/16，寄存器/线圈表，异常响应；MCP 提供受设备 ID 限定的读写工具 |
 | **M4 可靠性** | 故障注入和流量录制回看已支持；JS script codec（worker + vm）、透明代理、虚拟时钟、多设备场景、CI |
 | **更远** | CoAP、OPC UA、BACnet、BLE、pcapng 导出、可视化协议编辑器、Docker 发行 |
 
 ## 已知限制
 
 - TCP Client 和 UDP Client 均为单一目标。MQTT 仅支持 3.1.1 与 QoS 0/1；物理串口首轮支持 Linux/macOS，Windows 串口暂不支持。
+- Modbus 每台设备只配置一个从站地址；MCP 协议读写支持 TCP 和虚拟 RTU，不打开物理串口；虚拟 RTU 依赖 `socat`。
 - 设备配置会持久化；实时流量历史和运行时状态不会跨服务重启保留，重启后状态回到配置中的 `state`。手动录制的会话保存在 `data/recordings/`，异常退出后以中断状态恢复读取。
 - 可视化编辑会重新生成 YAML，源码模式中的注释和原格式只在当前编辑会话、且未做可视化修改时保留；服务端本身只存 JSON。
 - 模板补全只在可视化模板输入中提供；YAML/JSON 源码模式没有补全。

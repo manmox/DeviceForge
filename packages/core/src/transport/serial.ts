@@ -48,7 +48,7 @@ async function waitForPath(path: string, child: ChildProcess, timeoutMs = 5_000)
   });
 }
 
-function serialPortOptions(config: SerialConfig, path: string) {
+export function serialPortOptions(config: SerialConfig, path: string) {
   return {
     path,
     baudRate: config.baudRate,

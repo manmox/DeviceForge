@@ -11,11 +11,10 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import {
-  CONFIG_SECTIONS,
   configPanelId,
   configTabId,
-  nextSectionId,
   sectionHint,
+  visibleConfigSections,
   type ConfigSection,
   type ConfigSectionId,
 } from '../../lib/config-sections';
@@ -45,6 +44,7 @@ export function ConfigSectionNav({
   const tabRefs = useRef<
     Partial<Record<ConfigSectionId, HTMLButtonElement | null>>
   >({});
+  const sections = visibleConfigSections(config);
 
   useEffect(() => {
     tabRefs.current[active]?.scrollIntoView({
@@ -67,7 +67,13 @@ export function ConfigSectionNav({
     if (!direction) return;
 
     event.preventDefault();
-    const next = nextSectionId(active, direction);
+    const currentIndex = sections.findIndex((section) => section.id === active);
+    const nextIndex = direction === 'first'
+      ? 0
+      : direction === 'last'
+        ? sections.length - 1
+        : (currentIndex + (direction === 'next' ? 1 : -1) + sections.length) % sections.length;
+    const next = sections[nextIndex]!.id;
     onSelect(next);
     requestAnimationFrame(() => tabRefs.current[next]?.focus());
   }
@@ -79,7 +85,7 @@ export function ConfigSectionNav({
       onKeyDown={handleKeyDown}
       className="panel flex shrink-0 gap-1 overflow-x-auto p-1 lg:max-h-full lg:w-36 lg:flex-col lg:self-start lg:overflow-y-auto xl:w-44"
     >
-      {CONFIG_SECTIONS.map((section) => (
+      {sections.map((section) => (
         <SectionTab
           key={section.id}
           section={section}

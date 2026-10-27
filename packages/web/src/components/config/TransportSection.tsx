@@ -12,9 +12,12 @@ import type {
   TcpClientTransport,
   TcpServerTransport,
   TransportConfig,
+  ModbusTcpTransport,
+  ModbusRtuTransport,
 } from '@deviceforge/core';
 import { Cable, Plus, Trash2 } from 'lucide-react';
-import { changeTransportType } from '../../lib/config-defaults';
+import { changeTransportType, defaultTransport } from '../../lib/config-defaults';
+import { ModbusTablesEditor } from './ModbusTablesEditor';
 import {
   transportEndpoint,
   transportPresentation,
@@ -493,11 +496,18 @@ function ExtendedTransportFields({
   const bodySizeError = useIssueText('transport.maxBodyBytes');
   const messageSizeError = useIssueText('transport.maxMessageBytes');
   const serialPathError = useIssueText('transport.portPath');
+  const modbusSerialPathError = useIssueText('transport.serial.portPath');
   const baudRateError = useIssueText('transport.baudRate');
   const dataBitsError = useIssueText('transport.dataBits');
   const stopBitsError = useIssueText('transport.stopBits');
   const parityError = useIssueText('transport.parity');
   const flowControlError = useIssueText('transport.flowControl');
+  const modbusUnitIdError = useIssueText('transport.unitId');
+  const modbusBaudRateError = useIssueText('transport.serial.baudRate');
+  const modbusDataBitsError = useIssueText('transport.serial.dataBits');
+  const modbusStopBitsError = useIssueText('transport.serial.stopBits');
+  const modbusParityError = useIssueText('transport.serial.parity');
+  const modbusFlowControlError = useIssueText('transport.serial.flowControl');
   const flowOptions: SelectOption<'none' | 'rtscts' | 'xon-xoff'>[] = [
     { value: 'none', label: '无' },
     { value: 'rtscts', label: 'RTS/CTS' },
@@ -508,6 +518,73 @@ function ExtendedTransportFields({
     { value: 'even', label: '偶校验' },
     { value: 'odd', label: '奇校验' },
   ];
+
+  if (transport.type === 'modbus-tcp') {
+    const update = (patch: Partial<ModbusTcpTransport>) => onChange({ ...transport, ...patch });
+    return (
+      <>
+        <FormField label="监听地址" required error={hostError}>
+          <TextInput value={transport.host} onChange={(host) => update({ host })} disabled={disabled} monospace placeholder="127.0.0.1" />
+        </FormField>
+        <FormField label="TCP 端口" required error={portError} hint="默认 1502；0 表示由系统分配。">
+          <NumberInput value={transport.port} onChange={(port) => update({ port: port ?? 1502 })} min={0} max={65535} step={1} disabled={disabled} ariaLabel="Modbus TCP 端口" />
+        </FormField>
+        <FormField label="Unit ID" required error={modbusUnitIdError} hint="单个设备配置对应一个从站地址。">
+          <NumberInput value={transport.unitId} onChange={(unitId) => update({ unitId: unitId ?? 1 })} min={1} max={247} step={1} disabled={disabled} ariaLabel="Modbus Unit ID" />
+        </FormField>
+        <ModbusTablesEditor tables={transport.tables} onChange={(tables) => update({ tables })} disabled={disabled} />
+      </>
+    );
+  }
+
+  if (transport.type === 'modbus-rtu') {
+    const serial = transport.serial;
+    const update = (patch: Partial<ModbusRtuTransport>) => onChange({ ...transport, ...patch });
+    const updateSerial = (patch: Partial<SerialTransport | VirtualSerialTransport>) =>
+      update({ serial: { ...serial, ...patch } as ModbusRtuTransport['serial'] });
+    const serialType = serial.type;
+    return (
+      <>
+        <FormField label="串口模式" required hint="虚拟串口由 socat 创建 PTY 对，适合本机联调。">
+          <SelectInput<'serial' | 'virtual-serial'>
+            value={serialType}
+            options={[{ value: 'virtual-serial', label: '虚拟串口（PTY）' }, { value: 'serial', label: '物理串口' }]}
+            onChange={(type) => update({ serial: type === 'serial' ? defaultTransport('serial') : defaultTransport('virtual-serial') })}
+            disabled={disabled}
+            ariaLabel="Modbus RTU 串口模式"
+          />
+        </FormField>
+        <FormField label="从站地址" required error={modbusUnitIdError} hint="地址 0 只用于主站广播写入。">
+          <NumberInput value={transport.unitId} onChange={(unitId) => update({ unitId: unitId ?? 1 })} min={1} max={247} step={1} disabled={disabled} ariaLabel="Modbus RTU 从站地址" />
+        </FormField>
+        {serial.type === 'serial' ? (
+          <FormField label="串口路径" required error={modbusSerialPathError} hint="Linux 常见 /dev/ttyUSB0；macOS 常见 /dev/cu.usbserial-*。">
+            <TextInput value={serial.portPath} onChange={(portPath) => updateSerial({ portPath })} disabled={disabled} monospace placeholder="/dev/ttyUSB0" />
+          </FormField>
+        ) : (
+          <div className="sm:col-span-2 rounded-lg border border-white/10 bg-ink-900/30 p-2.5 text-[11px] leading-5 text-mist-400">
+            启动后会显示设备端和主站端 PTY 路径；MCP Modbus 工具通过主站端 PTY 发起真实 RTU 请求。
+          </div>
+        )}
+        <FormField label="波特率" required error={modbusBaudRateError}>
+          <NumberInput value={serial.baudRate} onChange={(baudRate) => updateSerial({ baudRate: baudRate ?? 9600 })} min={50} max={4_000_000} step={300} disabled={disabled} ariaLabel="Modbus RTU 波特率" />
+        </FormField>
+        <FormField label="数据位" error={modbusDataBitsError}>
+          <SelectInput<string> value={String(serial.dataBits)} options={[5, 6, 7, 8].map((value) => ({ value: String(value), label: String(value) }))} onChange={(value) => updateSerial({ dataBits: Number(value) as 5 | 6 | 7 | 8 })} disabled={disabled} ariaLabel="Modbus RTU 数据位" />
+        </FormField>
+        <FormField label="停止位" error={modbusStopBitsError}>
+          <SelectInput<string> value={String(serial.stopBits)} options={[1, 1.5, 2].map((value) => ({ value: String(value), label: String(value) }))} onChange={(value) => updateSerial({ stopBits: Number(value) as 1 | 1.5 | 2 })} disabled={disabled} ariaLabel="Modbus RTU 停止位" />
+        </FormField>
+        <FormField label="校验位" error={modbusParityError}>
+          <SelectInput<'none' | 'even' | 'odd'> value={serial.parity} options={parityOptions} onChange={(parity) => updateSerial({ parity })} disabled={disabled} ariaLabel="Modbus RTU 校验位" />
+        </FormField>
+        <FormField label="流控制" error={modbusFlowControlError}>
+          <SelectInput<'none' | 'rtscts' | 'xon-xoff'> value={serial.flowControl} options={flowOptions} onChange={(flowControl) => updateSerial({ flowControl })} disabled={disabled} ariaLabel="Modbus RTU 流控制" />
+        </FormField>
+        <ModbusTablesEditor tables={transport.tables} onChange={(tables) => update({ tables })} disabled={disabled} />
+      </>
+    );
+  }
 
   if (transport.type === 'serial' || transport.type === 'virtual-serial') {
     const updateSerial = (patch: Partial<SerialTransport | VirtualSerialTransport>) =>

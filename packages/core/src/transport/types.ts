@@ -5,6 +5,7 @@ import type {
   HttpRequestMetadata,
   TransportMessageMetadata,
   TransportStatus,
+  ModbusTrafficMetadata,
 } from '../types';
 
 export interface TransportSendOptions {
@@ -17,6 +18,7 @@ export interface TransportSendOptions {
     request?: HttpRequestMetadata;
   };
   websocket?: { isBinary?: boolean; metadata?: import('../types').WebSocketMessageMetadata };
+  modbus?: ModbusTrafficMetadata;
 }
 
 export interface TransportEvents {

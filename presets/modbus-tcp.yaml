@@ -1,0 +1,22 @@
+id: modbus-tcp-slave
+name: Modbus TCP 从站
+description: 本机 Modbus TCP 从站，含线圈与寄存器示例数据
+transport:
+  type: modbus-tcp
+  host: 127.0.0.1
+  port: 1502
+  unitId: 1
+  tables:
+    coils:
+      "0": false
+      "1": true
+    discreteInputs:
+      "0": true
+      "1": false
+    holdingRegisters:
+      "0": 100
+      "1": 200
+      "2": 300
+    inputRegisters:
+      "0": 42
+      "1": 25

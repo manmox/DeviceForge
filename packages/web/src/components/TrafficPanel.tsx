@@ -224,7 +224,9 @@ export function TrafficPanel() {
                     {presentation.trafficEmptyHint}
                     {device.config.transport.type === 'http-server'
                       ? ' HTTP 响应由请求规则生成。'
-                      : ' 也可以用上方面板手动发送一帧。'}
+                      : device.config.transport.type === 'modbus-tcp' || device.config.transport.type === 'modbus-rtu'
+                        ? ' 使用 MCP 的 modbus_read/modbus_write 工具或外部 Modbus 主站产生请求。'
+                        : ' 也可以用上方面板手动发送一帧。'}
                   </p>
                 </div>
               </div>

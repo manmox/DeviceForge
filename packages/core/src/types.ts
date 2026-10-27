@@ -41,10 +41,24 @@ export const WebSocketMessageMetadataSchema = z.object({
 
 export type WebSocketMessageMetadata = z.infer<typeof WebSocketMessageMetadataSchema>;
 
+export const ModbusTrafficMetadataSchema = z.object({
+  mode: z.enum(['tcp', 'rtu']),
+  unitId: z.number().int().min(0).max(255),
+  functionCode: z.number().int().min(0).max(255),
+  table: z.enum(['coils', 'discreteInputs', 'holdingRegisters', 'inputRegisters']).optional(),
+  address: z.number().int().min(0).max(65_535).optional(),
+  quantity: z.number().int().min(0).max(65_535).optional(),
+  exceptionCode: z.number().int().min(1).max(255).optional(),
+  broadcast: z.boolean().optional(),
+});
+
+export type ModbusTrafficMetadata = z.infer<typeof ModbusTrafficMetadataSchema>;
+
 export interface TransportMessageMetadata {
   mqtt?: MqttMessageMetadata;
   http?: HttpRequestMetadata;
   websocket?: WebSocketMessageMetadata;
+  modbus?: ModbusTrafficMetadata;
 }
 
 export const ConnectionInfoSchema = z.object({
@@ -84,6 +98,7 @@ export const TrafficEventSchema = z.object({
   http: HttpTrafficMetadataSchema.optional(),
   httpResponse: HttpResponseTrafficMetadataSchema.optional(),
   websocket: WebSocketMessageMetadataSchema.optional(),
+  modbus: ModbusTrafficMetadataSchema.optional(),
 });
 
 export type TrafficEvent = z.infer<typeof TrafficEventSchema>;

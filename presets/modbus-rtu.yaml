@@ -1,0 +1,25 @@
+id: modbus-rtu-slave
+name: Modbus RTU 虚拟从站
+description: 通过 socat PTY 对提供 Modbus RTU 从站，默认 9600、8N1
+transport:
+  type: modbus-rtu
+  unitId: 1
+  serial:
+    type: virtual-serial
+    baudRate: 9600
+    dataBits: 8
+    stopBits: 1
+    parity: none
+    flowControl: none
+  tables:
+    coils:
+      "0": false
+      "1": true
+    discreteInputs:
+      "0": true
+      "1": false
+    holdingRegisters:
+      "0": 100
+      "1": 200
+    inputRegisters:
+      "0": 42

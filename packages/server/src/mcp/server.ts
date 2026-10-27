@@ -6,6 +6,7 @@ import { registerProjectTools } from './tools/project-tools';
 import { registerRecordingTools } from './tools/recording-tools';
 import { registerRuntimeTools } from './tools/runtime-tools';
 import { registerTrafficTools } from './tools/traffic-tools';
+import { registerModbusTools } from './tools/modbus-tools';
 
 export function createDeviceForgeMcpServer(capabilities: McpCapabilities): McpServer {
   const server = new McpServer({
@@ -19,6 +20,7 @@ export function createDeviceForgeMcpServer(capabilities: McpCapabilities): McpSe
   registerTrafficTools(server, capabilities.traffic);
   registerFaultInjectionTools(server, capabilities.faultInjection);
   registerRecordingTools(server, capabilities.recordings);
+  registerModbusTools(server, capabilities.modbus);
 
   return server;
 }

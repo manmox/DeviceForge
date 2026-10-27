@@ -65,6 +65,17 @@ export function SendPanel() {
 
   if (!device) return null;
 
+  if (device.config.transport.type === 'modbus-tcp' || device.config.transport.type === 'modbus-rtu') {
+    return (
+      <section className="panel shrink-0 px-3 py-2.5">
+        <div className="text-xs font-medium text-mist-200">Modbus 从站</div>
+        <p className="mt-1 text-[11px] leading-5 text-mist-500">
+          从站按线圈与寄存器表自动响应请求。通过 MCP 的 modbus_read/modbus_write 工具，或外部 Modbus 主站发起读写。
+        </p>
+      </section>
+    );
+  }
+
   const presentation = transportPresentation(device.config.transport.type);
   const connected = connections.length > 0;
   const brokerReady =

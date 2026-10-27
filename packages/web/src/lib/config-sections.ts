@@ -67,6 +67,14 @@ export const CONFIG_SECTIONS: ConfigSection[] = [
   },
 ];
 
+export function visibleConfigSections(config: DeviceConfig): ConfigSection[] {
+  if (config.transport.type === 'modbus-tcp' || config.transport.type === 'modbus-rtu') {
+    return CONFIG_SECTIONS.filter((section) =>
+      section.id !== 'framing' && section.id !== 'codec' && section.id !== 'rules');
+  }
+  return CONFIG_SECTIONS;
+}
+
 export const CONFIG_SECTION_IDS: ConfigSectionId[] = CONFIG_SECTIONS.map(
   (section) => section.id,
 );

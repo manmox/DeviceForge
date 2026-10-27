@@ -8,11 +8,11 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  CONFIG_SECTIONS,
   configPanelId,
   configTabId,
   firstIssueSection,
   type ConfigSectionId,
+  visibleConfigSections,
 } from '../../lib/config-sections';
 import type { ValidationIssue } from '../../types';
 import { ConfigIssuesProvider } from '../form/ConfigIssuesContext';
@@ -48,6 +48,7 @@ export function DeviceConfigForm({
   const [internalSection, setInternalSection] =
     useState<ConfigSectionId>(defaultSection);
   const active = activeSection ?? internalSection;
+  const sections = visibleConfigSections(value);
 
   const selectSection = useCallback(
     (next: ConfigSectionId) => {
@@ -68,6 +69,10 @@ export function DeviceConfigForm({
     const first = firstIssueSection(issues);
     if (first) selectSection(first);
   }, [issues, selectSection]);
+
+  useEffect(() => {
+    if (!sections.some((section) => section.id === active)) selectSection('transport');
+  }, [active, sections, selectSection]);
 
   const content: Record<ConfigSectionId, ReactNode> = {
     basic: (
@@ -123,7 +128,7 @@ export function DeviceConfigForm({
         />
 
         <div className="relative min-h-0 flex-1">
-          {CONFIG_SECTIONS.map((section) => {
+          {sections.map((section) => {
             const isActive = active === section.id;
             return (
               <div

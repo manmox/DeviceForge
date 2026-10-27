@@ -27,7 +27,10 @@ export function ConnectionsPanel() {
     device.config.transport,
     device.status.endpoints,
   );
-  const endpointLabel = device.config.transport.type === 'virtual-serial' && device.status.endpoints.length > 1
+  const isVirtualRtu = device.config.transport.type === 'modbus-rtu'
+    && device.config.transport.serial.type === 'virtual-serial';
+  const endpointLabel = (device.config.transport.type === 'virtual-serial' || isVirtualRtu)
+    && device.status.endpoints.length > 1
     ? device.status.endpoints.join(' ↔ ')
     : endpoint;
   const paused = device.status.transport.state === 'disconnected';

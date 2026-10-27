@@ -72,6 +72,14 @@ describe('transport defaults', () => {
     expect(defaultTransport('virtual-serial')).toMatchObject({ type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
     expect(defaultTransport('http-server')).toEqual({ type: 'http-server', host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 });
     expect(defaultTransport('websocket-server')).toEqual({ type: 'websocket-server', host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 });
+    expect(defaultTransport('modbus-tcp')).toEqual({
+      type: 'modbus-tcp', host: '127.0.0.1', port: 1502, unitId: 1,
+      tables: { coils: {}, discreteInputs: {}, holdingRegisters: {}, inputRegisters: {} },
+    });
+    expect(defaultTransport('modbus-rtu')).toMatchObject({
+      type: 'modbus-rtu', unitId: 1,
+      serial: { type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' },
+    });
     expect(defaultTransport('udp-server')).toEqual({ type: 'udp-server', host: '127.0.0.1', port: 19011 });
     expect(defaultTransport('udp-client')).toEqual({ type: 'udp-client', host: '127.0.0.1', port: 19011, localPort: 0 });
     expect(defaultTransport('serial')).toMatchObject({ type: 'serial', portPath: '/dev/ttyUSB0', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });

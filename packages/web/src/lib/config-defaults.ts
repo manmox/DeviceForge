@@ -21,6 +21,8 @@ import type {
   HttpServerTransport,
   WebSocketServerTransport,
   TransportConfig,
+  ModbusTcpTransport,
+  ModbusRtuTransport,
 } from '@deviceforge/core';
 import { fieldNeedsLength, isMultiByteFieldType, isNumericFieldType } from './codec-fields';
 import { withRuleTrigger, type RuleTrigger } from './rule-shape';
@@ -111,6 +113,8 @@ export function defaultTransport(type: 'serial'): SerialTransport;
 export function defaultTransport(type: 'virtual-serial'): VirtualSerialTransport;
 export function defaultTransport(type: 'http-server'): HttpServerTransport;
 export function defaultTransport(type: 'websocket-server'): WebSocketServerTransport;
+export function defaultTransport(type: 'modbus-tcp'): ModbusTcpTransport;
+export function defaultTransport(type: 'modbus-rtu'): ModbusRtuTransport;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig;
 export function defaultTransport(type: TransportConfig['type']): TransportConfig {
   if (type === 'tcp-client') {
@@ -169,6 +173,30 @@ export function defaultTransport(type: TransportConfig['type']): TransportConfig
   if (type === 'websocket-server') {
     return { type, host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 };
   }
+  if (type === 'modbus-tcp') {
+    return {
+      type,
+      host: '127.0.0.1',
+      port: 1502,
+      unitId: 1,
+      tables: { coils: {}, discreteInputs: {}, holdingRegisters: {}, inputRegisters: {} },
+    };
+  }
+  if (type === 'modbus-rtu') {
+    return {
+      type,
+      serial: {
+        type: 'virtual-serial',
+        baudRate: 9600,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      },
+      unitId: 1,
+      tables: { coils: {}, discreteInputs: {}, holdingRegisters: {}, inputRegisters: {} },
+    };
+  }
   return { type: 'tcp-server', host: '127.0.0.1', port: 19010 };
 }
 
@@ -213,6 +241,7 @@ export function changeTransportType(
     return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };
   }
   if (type === 'serial' || type === 'virtual-serial') return defaultTransport(type);
+  if (type === 'modbus-tcp' || type === 'modbus-rtu') return defaultTransport(type);
 
   const defaults = defaultTransport('tcp-server');
   return { ...defaults, host, port: currentPort > 0 ? currentPort : defaults.port };

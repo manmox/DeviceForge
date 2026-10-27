@@ -4,14 +4,59 @@ import type {
   PresetApplication,
   ProjectFileApplication,
 } from '../application/contracts';
+import {
+  modbusRead,
+  modbusWrite,
+  modbusVirtualSerialTarget,
+} from '@deviceforge/core';
 import type {
   ConnectionInfo,
   DeviceStatus,
   FaultInjectionConfig,
   OutgoingMessage,
   TrafficEvent,
+  ModbusReadOptions,
+  ModbusWriteOptions,
+  ModbusReadableTable,
+  ModbusWritableTable,
+  ModbusWriteValues,
 } from '@deviceforge/core';
 import type { RecordingApplication } from '../application/contracts';
+
+function modbusEndpoint(id: string, runtimeManager: RuntimeManagerPort) {
+  const summary = runtimeManager.get(id);
+  if (!summary) throw new Error(`设备 ${id} 不存在`);
+  if (summary.status.state !== 'running') throw new Error(`设备 ${id} 尚未运行`);
+  const transport = summary.config.transport;
+
+  if (transport.type === 'modbus-tcp') {
+    const endpoint = summary.status.endpoints[0];
+    if (!endpoint) throw new Error(`Modbus TCP 设备 ${id} 尚无监听端点`);
+    const separator = endpoint.lastIndexOf(':');
+    const port = Number(endpoint.slice(separator + 1));
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error(`Modbus TCP 设备 ${id} 的监听端口无效`);
+    }
+    return {
+      target: { mode: 'tcp' as const, host: transport.host, port },
+      unitId: transport.unitId,
+    };
+  }
+
+  if (transport.type === 'modbus-rtu') {
+    if (transport.serial.type !== 'virtual-serial') {
+      throw new Error('MCP Modbus RTU 读写工具只支持虚拟串口；物理串口请使用外部主站');
+    }
+    const hostPath = summary.status.endpoints[1];
+    if (!hostPath) throw new Error(`Modbus RTU 设备 ${id} 的主站 PTY 尚未就绪`);
+    return {
+      target: modbusVirtualSerialTarget(hostPath, transport.serial),
+      unitId: transport.unitId,
+    };
+  }
+
+  throw new Error(`设备 ${id} 不是 Modbus TCP 或 RTU 从站`);
+}
 
 export interface RuntimeDevicePort {
   getState(): Record<string, unknown>;
@@ -125,6 +170,22 @@ export function createMcpCapabilities(options: {
           throw new Error('仅允许删除已停止的录制会话');
         }
         return recordings.delete(deviceId, recordingId);
+      },
+    },
+    modbus: {
+      read: async (id, table: ModbusReadableTable, address: number, quantity: number) => {
+        const endpoint = modbusEndpoint(id, runtimeManager);
+        return modbusRead({ ...endpoint, table, address, quantity } as ModbusReadOptions);
+      },
+      write: async (
+        id,
+        table: ModbusWritableTable,
+        address: number,
+        values: ModbusWriteValues,
+        broadcast?: boolean,
+      ) => {
+        const endpoint = modbusEndpoint(id, runtimeManager);
+        return modbusWrite({ ...endpoint, table, address, values, broadcast } as ModbusWriteOptions);
       },
     },
   };

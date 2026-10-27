@@ -47,6 +47,8 @@ describe('transportPresentation', () => {
     expect(transportPresentation('http-server').kindLabel).toBe('HTTP Server');
     expect(transportPresentation('websocket-server').connectionUnit).toBe('个客户端');
     expect(transportPresentation('virtual-serial').endpointLabel).toBe('PTY 端点');
+    expect(transportPresentation('modbus-tcp').peerLabel).toBe('主站客户端');
+    expect(transportPresentation('modbus-rtu').modeLabel).toBe('Modbus RTU 从站');
   });
 
   it('builds endpoint text for server, client and IPv6', () => {
@@ -82,6 +84,8 @@ describe('transportPresentation', () => {
     expect(formatHostPort('[::1]', 9000)).toBe('[::1]:9000');
     expect(transportEndpoint({ type: 'http-server', host: '127.0.0.1', port: 19080, maxBodyBytes: 1_048_576 })).toBe('http://127.0.0.1:19080');
     expect(transportEndpoint({ type: 'websocket-server', host: '127.0.0.1', port: 19081, path: '/ws', maxMessageBytes: 1_048_576 })).toBe('ws://127.0.0.1:19081/ws');
+    expect(transportEndpoint({ type: 'modbus-tcp', host: '127.0.0.1', port: 1502, unitId: 1, tables: { coils: {}, discreteInputs: {}, holdingRegisters: {}, inputRegisters: {} } })).toBe('127.0.0.1:1502');
+    expect(transportEndpoint({ type: 'modbus-rtu', unitId: 1, serial: { type: 'serial', portPath: '/dev/ttyUSB0', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' }, tables: { coils: {}, discreteInputs: {}, holdingRegisters: {}, inputRegisters: {} } })).toBe('/dev/ttyUSB0');
     expect(transportEndpoint({ type: 'virtual-serial', baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' })).toBe('启动后由 socat 分配');
   });
 

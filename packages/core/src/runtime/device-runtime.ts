@@ -29,6 +29,8 @@ import {
 } from './protocol-session';
 import { TrafficBuffer } from './traffic-buffer';
 import { FaultInjector, type AppliedFault } from './fault-injector';
+import { processModbusRequest } from '../modbus';
+import type { ModbusTables } from '../schema/device';
 
 export interface DeviceEventMap {
   traffic: TrafficEvent;
@@ -62,7 +64,18 @@ type RuleTrigger = 'start' | 'connect' | 'frame' | 'interval';
 function isMessageTransport(type: DeviceConfig['transport']['type']): boolean {
   return type === 'mqtt-client' || type === 'mqtt-broker' ||
     type === 'udp-server' || type === 'udp-client' ||
-    type === 'http-server' || type === 'websocket-server';
+    type === 'http-server' || type === 'websocket-server' ||
+    type === 'modbus-tcp' || type === 'modbus-rtu';
+}
+
+function isModbusTransport(type: DeviceConfig['transport']['type']): boolean {
+  return type === 'modbus-tcp' || type === 'modbus-rtu';
+}
+
+function isModbusConfig(
+  transport: DeviceConfig['transport'],
+): transport is Extract<DeviceConfig['transport'], { type: 'modbus-tcp' | 'modbus-rtu' }> {
+  return isModbusTransport(transport.type);
 }
 
 function errorMessage(error: unknown): string {
@@ -109,6 +122,7 @@ export class DeviceRuntime {
   private readonly faultInjector: FaultInjector;
   private rules: Rule[];
   private state: Record<string, unknown>;
+  private modbusTables?: ModbusTables;
   private templateCounters: Record<string, number> = { tx: 0, rx: 0 };
   private transport?: TransportAdapter;
   private readonly respondedHttpRequests = new Set<string>();
@@ -129,6 +143,9 @@ export class DeviceRuntime {
     });
     this.rules = config.rules;
     this.state = structuredClone(config.state);
+    if (isModbusConfig(config.transport)) {
+      this.modbusTables = structuredClone(config.transport.tables);
+    }
     this.traffic = new TrafficBuffer(options.trafficCapacity ?? 5000);
     this.faultInjector = new FaultInjector(config.faultInjection, {
       onFault: (event) => this.recordAppliedFault(event),
@@ -308,6 +325,9 @@ export class DeviceRuntime {
     this.protocolSession = this.createProtocolSession();
     this.rules = [...config.rules];
     this.state = structuredClone(config.state);
+    this.modbusTables = isModbusConfig(config.transport)
+      ? structuredClone(config.transport.tables)
+      : undefined;
     this.framers.clear();
     this.frameQueues.clear();
     this.clearTimers();
@@ -326,6 +346,9 @@ export class DeviceRuntime {
   }
 
   async send(message: OutgoingMessage, options: SendOptions = {}): Promise<void> {
+    if (isModbusConfig(this._config.transport)) {
+      throw new Error('Modbus 从站只响应协议请求，请使用 Modbus 主站客户端或 MCP modbus_read/modbus_write 工具');
+    }
     if (options.http && this.respondedHttpRequests.has(options.http.requestId)) return;
     const transport = this.transport;
     if (!transport) throw new Error('设备未启动');
@@ -491,11 +514,16 @@ export class DeviceRuntime {
   }
 
   getState(): Record<string, unknown> {
-    return { ...this.state };
+    return {
+      ...this.state,
+      ...(this.modbusTables ? { modbus: structuredClone(this.modbusTables) } : {}),
+    };
   }
 
   setState(next: Record<string, unknown>): Record<string, unknown> {
-    this.state = structuredClone(next);
+    const base = { ...next };
+    if (this.modbusTables) delete base.modbus;
+    this.state = structuredClone(base);
     const state = this.getState();
     this.bus.emit('state', { deviceId: this.id, state });
     return state;
@@ -605,6 +633,11 @@ export class DeviceRuntime {
     frame: Buffer,
     metadata?: TransportMessageMetadata,
   ): Promise<void> {
+    if (isModbusTransport(this._config.transport.type)) {
+      await this.handleModbusFrame(connectionId, frame);
+      return;
+    }
+
     let decoded;
     try {
       decoded = this.codec.decode(frame);
@@ -958,6 +991,75 @@ export class DeviceRuntime {
     };
   }
 
+  private async handleModbusFrame(connectionId: string, frame: Buffer): Promise<void> {
+    const transportConfig = this._config.transport;
+    if (!isModbusConfig(transportConfig) || !this.modbusTables) return;
+    const mode = transportConfig.type === 'modbus-tcp' ? 'tcp' : 'rtu';
+    const result = processModbusRequest(
+      frame,
+      mode,
+      transportConfig.unitId,
+      this.modbusTables,
+    );
+    const requestDescription = {
+      protocol: mode === 'tcp' ? 'Modbus TCP' : 'Modbus RTU',
+      ...result.request,
+    };
+    this.pushTraffic({
+      id: randomUUID(),
+      deviceId: this.id,
+      connectionId,
+      ts: Date.now(),
+      direction: 'in',
+      data: frame.toString('hex'),
+      size: frame.length,
+      decoded: requestDescription,
+      modbus: result.request,
+      error: result.error,
+      note: result.ignored && !result.error
+        ? result.request.broadcast
+          ? 'RTU 广播写入不返回响应'
+          : '请求地址与当前从站不匹配，已忽略'
+        : undefined,
+    });
+
+    if (result.error) {
+      this.bus.emit('error', { deviceId: this.id, message: result.error, connectionId });
+      return;
+    }
+    if (result.changed) this.bus.emit('state', { deviceId: this.id, state: this.getState() });
+    if (!result.response || !result.responseMetadata) return;
+
+    const transport = this.transport;
+    if (!transport) return;
+    try {
+      await this.sendThroughFaultInjector(transport, connectionId, result.response, {
+        modbus: result.responseMetadata,
+      });
+      this.counters.txFrames += 1;
+      this.templateCounters.tx = (this.templateCounters.tx ?? 0) + 1;
+      this.pushTraffic({
+        id: randomUUID(),
+        deviceId: this.id,
+        connectionId,
+        ts: Date.now(),
+        direction: 'out',
+        data: result.response.toString('hex'),
+        size: result.response.length,
+        decoded: {
+          protocol: mode === 'tcp' ? 'Modbus TCP' : 'Modbus RTU',
+          ...result.responseMetadata,
+        },
+        modbus: result.responseMetadata,
+        note: this.faultInjector.isEnabled && this._config.faultInjection.rules.length > 0
+          ? '故障注入结果详见系统事件'
+          : undefined,
+      });
+    } catch (error) {
+      this.reportError(`发送 Modbus 响应失败：${errorMessage(error)}`, connectionId);
+    }
+  }
+
   private async sendThroughFaultInjector(
     transport: TransportAdapter,
     connectionId: string,
@@ -971,6 +1073,7 @@ export class DeviceRuntime {
           mqtt: this.outgoingMqttMetadata(options.topic),
           http: options.http?.request,
           websocket: options.websocket?.metadata,
+          modbus: options.modbus,
         });
       }
       if (result.applied?.action === 'disconnect') {
@@ -1001,7 +1104,9 @@ export class DeviceRuntime {
     const direction = event.direction === 'in' ? '入站' : '出站';
     const messageTransport = Boolean(metadata?.mqtt || metadata?.http || metadata?.websocket) ||
       this._config.transport.type === 'udp-server' ||
-      this._config.transport.type === 'udp-client';
+      this._config.transport.type === 'udp-client' ||
+      Boolean(metadata?.modbus) ||
+      isModbusTransport(this._config.transport.type);
     const item = messageTransport ? `第 ${event.index} 条消息` : `第 ${event.index} 段`;
     const labels: Record<AppliedFault['action'], string> = {
       delay: '延迟',
@@ -1016,6 +1121,7 @@ export class DeviceRuntime {
     if (metadata?.mqtt) traffic.mqtt = metadata.mqtt;
     if (metadata?.http) traffic.http = this.safeHttpMetadata(metadata.http);
     if (metadata?.websocket) traffic.websocket = this.safeWebSocketMetadata(metadata.websocket);
+    if (metadata?.modbus) traffic.modbus = metadata.modbus;
     this.pushTraffic(traffic);
   }
 

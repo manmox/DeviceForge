@@ -44,6 +44,17 @@ export function EventDetail({
   const checksumValid = event.decoded?._checksumValid;
   const warnings = event.decoded?._warnings;
   const protocol = event.decoded?._codec === 'text';
+  const modbusFunctionNames: Record<number, string> = {
+    1: '读取线圈', 2: '读取离散输入', 3: '读取保持寄存器', 4: '读取输入寄存器',
+    5: '写单个线圈', 6: '写单个保持寄存器', 15: '写多个线圈', 16: '写多个保持寄存器',
+  };
+  const modbusTableNames: Record<string, string> = {
+    coils: '线圈', discreteInputs: '离散输入',
+    holdingRegisters: '保持寄存器', inputRegisters: '输入寄存器',
+  };
+  const modbusExceptionNames: Record<number, string> = {
+    1: '非法功能', 2: '非法数据地址', 3: '非法数据值', 4: '从站设备故障',
+  };
 
   return (
     <aside className={`panel flex min-h-0 flex-col overflow-hidden ${className}`}>
@@ -108,6 +119,22 @@ export function EventDetail({
                   <div className="mt-0.5 break-all font-mono text-mist-300">{event.mqtt.clientId}</div>
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {event.modbus && (
+          <section className="mt-3 rounded-lg border border-white/10 bg-ink-950/30 p-2.5">
+            <h4 className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">Modbus 请求</h4>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+              <div><div className="text-mist-500">协议</div><div className="mt-0.5 text-mist-200">Modbus {event.modbus.mode.toUpperCase()}</div></div>
+              <div><div className="text-mist-500">Unit ID</div><div className="mt-0.5 font-mono text-mist-200">{event.modbus.unitId}</div></div>
+              <div><div className="text-mist-500">功能码</div><div className="mt-0.5 text-mist-200">FC {String(event.modbus.functionCode).padStart(2, '0')} · {modbusFunctionNames[event.modbus.functionCode] ?? '未支持功能'}</div></div>
+              {event.modbus.table && <div><div className="text-mist-500">数据表</div><div className="mt-0.5 text-mist-200">{modbusTableNames[event.modbus.table] ?? event.modbus.table}</div></div>}
+              {event.modbus.address !== undefined && <div><div className="text-mist-500">起始地址</div><div className="mt-0.5 font-mono text-mist-200">{event.modbus.address}</div></div>}
+              {event.modbus.quantity !== undefined && <div><div className="text-mist-500">数量</div><div className="mt-0.5 font-mono text-mist-200">{event.modbus.quantity}</div></div>}
+              {event.modbus.exceptionCode !== undefined && <div className="col-span-2"><div className="text-mist-500">异常响应</div><div className="mt-0.5 text-rose-300">{event.modbus.exceptionCode} · {modbusExceptionNames[event.modbus.exceptionCode] ?? '未知异常'}</div></div>}
+              {event.modbus.broadcast && <div className="col-span-2 text-amber-300">RTU 广播写入，无响应</div>}
             </div>
           </section>
         )}

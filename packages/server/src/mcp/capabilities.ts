@@ -4,6 +4,10 @@ import type {
   DeviceStatus,
   OutgoingMessage,
   TrafficEvent,
+  ModbusOperationResult,
+  ModbusReadableTable,
+  ModbusWritableTable,
+  ModbusWriteValues,
 } from '@deviceforge/core';
 import type {
   DeviceConfigurationApplication,
@@ -68,6 +72,22 @@ export interface FaultInjectionCapabilities {
 
 export type RecordingCapabilities = RecordingApplication;
 
+export interface ModbusCapabilities {
+  read(
+    id: string,
+    table: ModbusReadableTable,
+    address: number,
+    quantity: number,
+  ): Promise<ModbusOperationResult>;
+  write(
+    id: string,
+    table: ModbusWritableTable,
+    address: number,
+    values: ModbusWriteValues,
+    broadcast?: boolean,
+  ): Promise<ModbusOperationResult>;
+}
+
 export interface McpCapabilities {
   projectFiles: ProjectFileCapabilities;
   devices: DeviceCapabilities;
@@ -75,4 +95,5 @@ export interface McpCapabilities {
   traffic: TrafficCapabilities;
   faultInjection: FaultInjectionCapabilities;
   recordings: RecordingCapabilities;
+  modbus: ModbusCapabilities;
 }
